@@ -1,9 +1,14 @@
+use koopa::back::KoopaGenerator;
 use lalrpop_util::lalrpop_mod;
 use std::env::args;
 use std::error::Error;
 use std::fs;
 
 mod ast;
+mod ir;
+mod riscv;
+
+use riscv::GenerateAsm;
 
 lalrpop_mod!(sysy);
 
@@ -19,14 +24,18 @@ fn main() -> Result<(), Box<dyn Error>> {
 
   let ast = sysy::CompUnitParser::new().parse(&input).unwrap();
 
-  let ir = format!(r"
-fun @{}(): i32 {{
-%entry:
-  ret {}
-}}
-", ast.func_def.ident, ast.func_def.block.stmt.num);
+  let ir = ir::generate_program(ast)?;
 
-  fs::write(output, ir)?;
+  match mode.as_str() {
+    "-koopa" => {
+      let output = fs::File::create(output)?;
+      KoopaGenerator::new(output).generate_on(&ir)?;
+    }
+    "-riscv" => {
+      fs::write(output, ir.generate()?)?;
+    }
+    _ => panic!("unknown mode"),
+  }
 
   Ok(())
 }
