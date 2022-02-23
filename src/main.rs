@@ -3,6 +3,8 @@ use std::env::args;
 use std::error::Error;
 use std::fs::read_to_string;
 
+mod ast;
+
 lalrpop_mod!(sysy);
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -17,6 +19,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
   let ast = sysy::CompUnitParser::new().parse(&input).unwrap();
 
-  println!("{}", ast);
+  println!("{:#?}", ast);
   Ok(())
 }
