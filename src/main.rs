@@ -1,7 +1,7 @@
 use lalrpop_util::lalrpop_mod;
 use std::env::args;
 use std::error::Error;
-use std::fs::read_to_string;
+use std::fs;
 
 mod ast;
 
@@ -15,10 +15,18 @@ fn main() -> Result<(), Box<dyn Error>> {
   args.next();
   let output = args.next().expect("missing output");
 
-  let input = read_to_string(input)?;
+  let input = fs::read_to_string(input)?;
 
   let ast = sysy::CompUnitParser::new().parse(&input).unwrap();
 
-  println!("{:#?}", ast);
+  let ir = format!(r"
+fun @{}(): i32 {{
+%entry:
+  ret {}
+}}
+", ast.func_def.ident, ast.func_def.block.stmt.num);
+
+  fs::write(output, ir)?;
+
   Ok(())
 }

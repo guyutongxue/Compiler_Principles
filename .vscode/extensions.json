@@ -1,0 +1,6 @@
+{
+  "recommendations": [
+    "colejcummins.llvm-syntax-highlighting",
+    "matklad.rust-analyzer"
+  ]
+}

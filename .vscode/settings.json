@@ -1,0 +1,6 @@
+{
+  "files.associations": {
+    "*.sysy": "c",
+    "*.koopa": "llvm"
+  }
+}
