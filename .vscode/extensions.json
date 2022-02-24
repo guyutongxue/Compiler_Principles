@@ -1,6 +1,7 @@
 {
   "recommendations": [
     "colejcummins.llvm-syntax-highlighting",
+    "zhwu95.riscv",
     "matklad.rust-analyzer"
   ]
 }

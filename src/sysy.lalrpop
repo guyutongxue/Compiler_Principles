@@ -5,7 +5,7 @@ grammar;
 match {
   r"\s*" => {},
   r"//[^\n\r]*[\n\r]*" => {},
-  r"/\*[^*]*\*/" => {},
+  r"/\*[^*]*\*+([^/*][^*]*\*+)*/" => {},
   _
 }
 
@@ -21,7 +21,27 @@ FuncType: FuncType = "int" => FuncType::Int;
 
 Block: Block = "{" <stmt: Stmt> "}" => Block { <> };
 
-Stmt: Stmt = "return" <num: Number> ";" => Stmt { <> };
+Stmt: Stmt = "return" <exp: Exp> ";" => Stmt { <> };
+
+Exp: Exp = {
+  <exp: UnaryExp> => Exp::Unary(exp),
+}
+
+UnaryExp: UnaryExp = {
+  <exp: PrimaryExp> => UnaryExp::Primary(exp),
+  <op: UnaryOp> <exp: UnaryExp> => UnaryExp::Op(op, exp.into()),
+}
+
+PrimaryExp: PrimaryExp = {
+  "(" <exp: Exp> ")" => PrimaryExp::Paren(exp.into()),
+  <num: Number> => PrimaryExp::Num(num),
+}
+
+UnaryOp: UnaryOp = {
+  "+" => UnaryOp::Pos,
+  "-" => UnaryOp::Neg,
+  "!" => UnaryOp::Not,
+}
 
 Number: i32 = <num: IntConst> => <>;
 
