@@ -6,9 +6,9 @@ use std::fs;
 
 mod ast;
 mod ir;
-mod riscv;
+mod backend;
 
-use riscv::GenerateAsm;
+use backend::GenerateAsm;
 
 lalrpop_mod!(sysy);
 
