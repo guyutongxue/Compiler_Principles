@@ -49,11 +49,6 @@ impl<'a> GenerateAsmContext<'a> {
   }
 
   fn get_reg_from_value(&mut self, value: Value) -> Result<Reg, Box<dyn Error>> {
-    if let ValueKind::Integer(integer) = self.func_data.dfg().value(value).kind() {
-      if integer.value() == 0 {
-        return Ok(Reg::Zero);
-      }
-    }
     if let Some(reg) = self.regs.get(&value) {
       return Ok(*reg);
     }
@@ -103,31 +98,66 @@ impl GenerateAsmDetail for Value {
       ValueKind::Binary(binary) => {
         let lhs = binary.lhs();
         lhs.generate(context)?;
-        let lhs_reg = context.get_reg_from_value(lhs)?;
+        let rs1 = context.get_reg_from_value(lhs)?;
         let rhs = binary.rhs();
         rhs.generate(context)?;
-        let rhs_reg = context.get_reg_from_value(rhs)?;
+        let rs2 = context.get_reg_from_value(rhs)?;
         match binary.op() {
+          BinaryOp::And => {
+            context.push_inst(Inst::And(rs2, rs1, rs2));
+            context.regs.insert(self, rs2);
+          }
+          BinaryOp::Or => {
+            context.push_inst(Inst::Or(rs2, rs1, rs2));
+            context.regs.insert(self, rs2);
+          }
           BinaryOp::Eq => {
-            context.push_inst(Inst::Xor(lhs_reg, lhs_reg, rhs_reg));
-            context.push_inst(Inst::Seqz(lhs_reg, lhs_reg));
-            context.regs.insert(self, lhs_reg);
+            context.push_inst(Inst::Xor(rs2, rs1, rs2));
+            context.push_inst(Inst::Seqz(rs2, rs2));
+            context.regs.insert(self, rs2);
+          }
+          BinaryOp::NotEq => {
+            context.push_inst(Inst::Xor(rs2, rs1, rs2));
+            context.push_inst(Inst::Snez(rs2, rs2));
+            context.regs.insert(self, rs2);
+          }
+          BinaryOp::Lt => {
+            context.push_inst(Inst::Slt(rs2, rs1, rs2));
+            context.regs.insert(self, rs2);
+          }
+          BinaryOp::Gt => {
+            context.push_inst(Inst::Sgt(rs2, rs1, rs2));
+            context.regs.insert(self, rs2);
+          }
+          BinaryOp::Le => {
+            context.push_inst(Inst::Sgt(rs2, rs1, rs2));
+            context.push_inst(Inst::Seqz(rs2, rs2));
+            context.regs.insert(self, rs2);
+          }
+          BinaryOp::Ge => {
+            context.push_inst(Inst::Slt(rs2, rs1, rs2));
+            context.push_inst(Inst::Seqz(rs2, rs2));
+            context.regs.insert(self, rs2);
           }
           BinaryOp::Add => {
-            let rd = context.get_reg_from_value(self)?;
-            context.push_inst(Inst::Add(rd, lhs_reg, rhs_reg));
+            context.push_inst(Inst::Add(rs2, rs1, rs2));
+            context.regs.insert(self, rs2);
           }
           BinaryOp::Sub => {
-            let rd = context.get_reg_from_value(self)?;
-            context.push_inst(Inst::Sub(rd, lhs_reg, rhs_reg));
+            context.push_inst(Inst::Sub(rs2, rs1, rs2));
+            context.regs.insert(self, rs2);
           }
           BinaryOp::Mul => {
-            let rd = context.get_reg_from_value(self)?;
-            context.push_inst(Inst::Mul(rd, lhs_reg, rhs_reg));
+            context.push_inst(Inst::Mul(rs2, rs1, rs2));
+            context.regs.insert(self, rs2);
           }
           BinaryOp::Div => {
-            let rd = context.get_reg_from_value(self)?;
-            context.push_inst(Inst::Div(rd, lhs_reg, rhs_reg));
+            context.push_inst(Inst::Div(rs2, rs1, rs2));
+            context.regs.insert(self, rs2);
+          }
+          BinaryOp::Mod => {
+            context.push_inst(Inst::Rem(rs2, rs1, rs2));
+            context.regs.insert(self, rs2);
           }
           x => return Err(UnimplementedError(Box::from(x)).into()),
         }
@@ -135,9 +165,7 @@ impl GenerateAsmDetail for Value {
       ValueKind::Integer(integer) => {
         let value = integer.value();
         let rd = context.get_reg_from_value(self)?;
-        if value != 0 {
-          context.push_inst(Inst::Li(rd, value));
-        }
+        context.push_inst(Inst::Li(rd, value));
       }
 
       ValueKind::Return(ret) => {

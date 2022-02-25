@@ -6,7 +6,7 @@ use std::error::Error;
 
 use super::ast::{
   AddExp, AddOp, CompUnit, EqExp, Exp, LAndExp, LOrExp, MulExp, MulOp, PrimaryExp, RelExp,
-  UnaryExp, UnaryOp,
+  UnaryExp, UnaryOp, EqOp, RelOp,
 };
 use super::error::{PushKeyError, UnimplementedError};
 
@@ -99,7 +99,16 @@ impl GenerateValue for LOrExp {
   fn generate_value(&self, context: &mut GenerateValueContext) -> Result<Value, Box<dyn Error>> {
     match self {
       LOrExp::And(exp) => exp.generate_value(context),
-      x => Err(Box::new(UnimplementedError("LOrExp".into()))),
+      LOrExp::Or(lhs, rhs) => {
+        let zero = context.dfg().new_value().integer(0);
+        let lhs = lhs.generate_value(context)?;
+        let rhs = rhs.generate_value(context)?;
+        let result = context.dfg().new_value().binary(BinaryOp::Or, lhs, rhs);
+        context.add_inst(result)?;
+        let result = context.dfg().new_value().binary(BinaryOp::NotEq, result, zero);
+        context.add_inst(result)?;
+        Ok(result)
+      }
     }
   }
 }
@@ -108,7 +117,18 @@ impl GenerateValue for LAndExp {
   fn generate_value(&self, context: &mut GenerateValueContext) -> Result<Value, Box<dyn Error>> {
     match self {
       LAndExp::Eq(exp) => exp.generate_value(context),
-      x => Err(Box::new(UnimplementedError("LAndExp".into()))),
+      LAndExp::And(lhs, rhs) => {
+        let zero = context.dfg().new_value().integer(0);
+        let lhs = lhs.generate_value(context)?;
+        let lhs = context.dfg().new_value().binary(BinaryOp::NotEq, lhs, zero);
+        context.add_inst(lhs)?;
+        let rhs = rhs.generate_value(context)?;
+        let rhs = context.dfg().new_value().binary(BinaryOp::NotEq, rhs, zero);
+        context.add_inst(rhs)?;
+        let result = context.dfg().new_value().binary(BinaryOp::And, lhs, rhs);
+        context.add_inst(result)?;
+        Ok(result)
+      }
     }
   }
 }
@@ -117,7 +137,17 @@ impl GenerateValue for EqExp {
   fn generate_value(&self, context: &mut GenerateValueContext) -> Result<Value, Box<dyn Error>> {
     match self {
       EqExp::Rel(exp) => exp.generate_value(context),
-      x => Err(Box::new(UnimplementedError("EqExp".into()))),
+      EqExp::Eq(lhs, op, rhs) => {
+        let lhs = lhs.generate_value(context)?;
+        let rhs = rhs.generate_value(context)?;
+        let op = match op {
+          EqOp::Equal => BinaryOp::Eq,
+          EqOp::NotEqual => BinaryOp::NotEq,
+        };
+        let result = context.dfg().new_value().binary(op, lhs, rhs);
+        context.add_inst(result)?;
+        Ok(result)
+      }
     }
   }
 }
@@ -126,7 +156,19 @@ impl GenerateValue for RelExp {
   fn generate_value(&self, context: &mut GenerateValueContext) -> Result<Value, Box<dyn Error>> {
     match self {
       RelExp::Add(exp) => exp.generate_value(context),
-      x => Err(Box::new(UnimplementedError("RelExp".into()))),
+      RelExp::Rel(lhs, op, rhs) => {
+        let lhs = lhs.generate_value(context)?;
+        let rhs = rhs.generate_value(context)?;
+        let op = match op {
+          RelOp::Less => BinaryOp::Lt,
+          RelOp::LessEqual => BinaryOp::Le,
+          RelOp::Greater => BinaryOp::Gt,
+          RelOp::GreaterEqual => BinaryOp::Ge,
+        };
+        let result = context.dfg().new_value().binary(op, lhs, rhs);
+        context.add_inst(result)?;
+        Ok(result)
+      }
     }
   }
 }
