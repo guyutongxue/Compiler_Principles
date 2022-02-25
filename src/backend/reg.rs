@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub enum Reg {
   /// 恒为 0。

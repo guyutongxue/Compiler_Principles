@@ -1,0 +1,123 @@
+use super::ast::*;
+
+grammar;
+
+match {
+  r"\s*" => {},
+  r"//[^\n\r]*[\n\r]*" => {},
+  r"/\*[^*]*\*+([^/*][^*]*\*+)*/" => {},
+  _
+}
+
+pub CompUnit: CompUnit = <func_def: FuncDef> => CompUnit { <> };
+
+FuncDef: FuncDef = {
+  <func_type: FuncType> <ident: Ident> "(" ")" <block: Block> => {
+    FuncDef { <> }
+  }
+}
+
+FuncType: FuncType = "int" => FuncType::Int;
+
+Block: Block = "{" <stmt: Stmt> "}" => Block { <> };
+
+Stmt: Stmt = "return" <exp: Exp> ";" => Stmt { <> };
+
+Exp: Exp = {
+  <exp: LOrExp> => Exp::LOr(exp),
+}
+
+LOrExp: LOrExp = {
+  <exp: LAndExp> => LOrExp::And(exp.into()),
+  <lhs: LOrExp> "||" <rhs: LAndExp> => LOrExp::Or(lhs.into(), rhs.into()),
+}
+
+LAndExp: LAndExp = {
+  <exp: EqExp> => LAndExp::Eq(exp.into()),
+  <lhs: LAndExp> "&&" <rhs: EqExp> => LAndExp::And(lhs.into(), rhs.into()),
+}
+
+EqExp: EqExp = {
+  <exp: RelExp> => EqExp::Rel(exp.into()),
+  <lhs: EqExp> <op: EqOp> <rhs: RelExp> => EqExp::Eq(
+    lhs.into(), 
+    op, 
+    rhs.into()
+  ),
+}
+
+EqOp: EqOp = {
+  "==" => EqOp::Equal,
+  "!=" => EqOp::NotEqual,
+}
+
+RelExp: RelExp = {
+  <exp: AddExp> => RelExp::Add(exp.into()),
+  <lhs: RelExp> <op: RelOp> <rhs: AddExp> => RelExp::Rel(
+    lhs.into(), 
+    op, 
+    rhs.into()
+  ),
+}
+
+RelOp: RelOp = {
+  "<" => RelOp::Less,
+  "<=" => RelOp::LessEqual,
+  ">" => RelOp::Greater,
+  ">=" => RelOp::GreaterEqual,
+}
+
+AddExp: AddExp = {
+  <exp: MulExp> => AddExp::Mul(exp.into()),
+  <lhs: AddExp> <op: AddOp> <rhs: MulExp> => AddExp::Add(
+    lhs.into(), 
+    op, 
+    rhs.into()
+  ),
+}
+
+AddOp: AddOp = {
+  "+" => AddOp::Plus,
+  "-" => AddOp::Minus,
+}
+
+MulExp: MulExp = {
+  <exp: UnaryExp> => MulExp::Unary(exp.into()),
+  <lhs: MulExp> <op: MulOp> <rhs: UnaryExp> => MulExp::Mul(
+    lhs.into(), 
+    op, 
+    rhs.into()
+  ),
+}
+
+MulOp: MulOp = {
+  "*" => MulOp::Multiply,
+  "/" => MulOp::Divide,
+  "%" => MulOp::Modulo,
+}
+
+UnaryExp: UnaryExp = {
+  <exp: PrimaryExp> => UnaryExp::Primary(exp),
+  <op: UnaryOp> <exp: UnaryExp> => UnaryExp::Op(op, exp.into()),
+}
+
+UnaryOp: UnaryOp = {
+  "+" => UnaryOp::Positive,
+  "-" => UnaryOp::Negative,
+  "!" => UnaryOp::Not,
+}
+
+PrimaryExp: PrimaryExp = {
+  "(" <exp: Exp> ")" => PrimaryExp::Paren(exp.into()),
+  <num: Number> => PrimaryExp::Num(num),
+}
+
+Number: i32 = <num: IntConst> => <>;
+
+Ident: String = r"[_a-zA-Z][_a-zA-Z0-9]*" => <>.to_string();
+
+IntConst: i32 = {
+  r"[1-9][0-9]*" => i32::from_str_radix(<>, 10).unwrap(),
+  r"0[0-7]*" => i32::from_str_radix(<>, 8).unwrap(),
+  r"0[xX][0-9a-fA-F]+" => i32::from_str_radix(&<>[2..], 16).unwrap(),
+}

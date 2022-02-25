@@ -3,6 +3,7 @@
 pub type Label = String;
 use super::reg::Reg;
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Inst {
   /// 伪指令

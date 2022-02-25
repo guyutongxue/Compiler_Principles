@@ -1,16 +1,12 @@
 use koopa::back::KoopaGenerator;
-use lalrpop_util::lalrpop_mod;
 use std::env::args;
 use std::error::Error;
 use std::fs;
 
-mod ast;
-mod ir;
+mod frontend;
 mod backend;
 
 use backend::GenerateAsm;
-
-lalrpop_mod!(sysy);
 
 fn main() -> Result<(), Box<dyn Error>> {
   let mut args = args();
@@ -22,9 +18,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
   let input = fs::read_to_string(input)?;
 
-  let ast = sysy::CompUnitParser::new().parse(&input).unwrap();
-
-  let ir = ir::generate_program(ast)?;
+  let ir = frontend::generate(input)?;
 
   match mode.as_str() {
     "-koopa" => {

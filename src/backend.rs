@@ -113,9 +113,21 @@ impl GenerateAsmDetail for Value {
             context.push_inst(Inst::Seqz(lhs_reg, lhs_reg));
             context.regs.insert(self, lhs_reg);
           }
+          BinaryOp::Add => {
+            let rd = context.get_reg_from_value(self)?;
+            context.push_inst(Inst::Add(rd, lhs_reg, rhs_reg));
+          }
           BinaryOp::Sub => {
             let rd = context.get_reg_from_value(self)?;
             context.push_inst(Inst::Sub(rd, lhs_reg, rhs_reg));
+          }
+          BinaryOp::Mul => {
+            let rd = context.get_reg_from_value(self)?;
+            context.push_inst(Inst::Mul(rd, lhs_reg, rhs_reg));
+          }
+          BinaryOp::Div => {
+            let rd = context.get_reg_from_value(self)?;
+            context.push_inst(Inst::Div(rd, lhs_reg, rhs_reg));
           }
           x => return Err(UnimplementedError(Box::from(x)).into()),
         }
