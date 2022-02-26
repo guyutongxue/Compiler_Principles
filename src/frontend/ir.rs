@@ -8,6 +8,7 @@ use super::ast::{
   AddExp, AddOp, CompUnit, EqExp, Exp, LAndExp, LOrExp, MulExp, MulOp, PrimaryExp, RelExp,
   UnaryExp, UnaryOp, EqOp, RelOp,
 };
+#[allow(unused_imports)]
 use super::error::{PushKeyError, UnimplementedError};
 
 struct GenerateValueContext<'a> {

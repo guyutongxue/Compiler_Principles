@@ -1,40 +1,41 @@
+use argparse::{ParsedArgs, Mode};
 use koopa::back::KoopaGenerator;
 use std::env::args;
 use std::error::Error;
 use std::fs;
+use std::io::{stdout, Write};
 
 mod frontend;
 mod backend;
+mod argparse;
 
-use backend::GenerateAsm;
+fn compile(args: ParsedArgs) -> Result<(), Box<dyn Error>> {
+  let ParsedArgs { mode, input, output } = args;
+  let input = fs::read_to_string(&input[0])?;
+  let mut output: Box<dyn Write> = if output.is_none() {
+    Box::new(stdout())
+  } else {
+    Box::new(fs::File::create(output.unwrap())?)
+  };
 
-fn compile(mode: &str, input: &str, output: &str) -> Result<(), Box<dyn Error>> {
-  let input = fs::read_to_string(input)?;
-
-  let ir = frontend::generate(input)?;
+  let ir = frontend::generate_ir(input)?;
 
   match mode {
-    "-koopa" => {
-      let output = fs::File::create(output)?;
+    Mode::Koopa => {
       KoopaGenerator::new(output).generate_on(&ir)?;
     }
-    "-riscv" => {
-      fs::write(output, ir.generate()?)?;
+    Mode::Riscv => {
+      let insts = backend::generate_riscv(&ir)?;
+      output.write(insts.join("\n").as_bytes())?;
     }
-    _ => panic!("unknown mode"),
   }
   Ok(())
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-  let mut args = args();
-  args.next();
-  let mode = args.next().expect("missing mode");
-  let input = args.next().expect("missing input");
-  args.next();
-  let output = args.next().expect("missing output");
+  let args = argparse::parse(args())?;
 
-  compile(&mode, &input, &output).or_else(|e| {
+  compile(args).or_else(|e| {
     eprintln!("{}", e);
     Err(e)
   })?;

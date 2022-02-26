@@ -22,14 +22,3 @@ impl fmt::Display for OutOfRegistersError {
     write!(f, "out of registers")
   }
 }
-
-#[derive(Debug)]
-pub struct OtherError(pub &'static str);
-
-impl Error for OtherError {}
-
-impl fmt::Display for OtherError {
-  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-    write!(f, "{:#?}", self.0)
-  }
-}

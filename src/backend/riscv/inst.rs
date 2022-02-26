@@ -4,7 +4,7 @@ pub type Label = String;
 use super::reg::Reg;
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Inst {
   /// 伪指令
   /// - 汇编格式：`beqz rs, label`
