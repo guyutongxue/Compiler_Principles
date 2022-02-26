@@ -19,5 +19,7 @@ pub fn generate_riscv(ir: &Program) -> Result<Vec<String>, Box<dyn Error>> {
     text_asms.extend(asm.into_iter());
   }
   decls.extend(text_asms.into_iter());
+  decls.push("".into());
+
   Ok(decls)
 }

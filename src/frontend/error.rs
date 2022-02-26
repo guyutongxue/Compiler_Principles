@@ -2,7 +2,6 @@ use std::fmt;
 
 use std::error::Error;
 
-
 #[derive(Debug)]
 pub struct UnimplementedError(pub String);
 
@@ -13,6 +12,19 @@ impl fmt::Display for UnimplementedError {
     write!(f, "{} unimplemented", self.0)
   }
 }
+
+#[derive(Debug)]
+pub struct CompileError(pub String);
+
+impl Error for CompileError {}
+
+impl fmt::Display for CompileError {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    write!(f, "{}", self.0)
+  }
+}
+
+
 
 #[derive(Debug)]
 pub struct PushKeyError(pub Box<dyn fmt::Debug>);

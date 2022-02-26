@@ -15,15 +15,19 @@ pub enum FuncType {
   Int,
 }
 
-#[derive(Debug)]
-pub struct Block {
-  pub stmt: Stmt,
-}
+pub type Block = Vec<BlockItem>;
 
 #[derive(Debug)]
-pub enum Exp {
-  LOr(LOrExp),
+pub enum BlockItem {
+  Decl(Decl),
+  Stmt(Stmt),
 }
+#[derive(Debug)]
+pub struct Stmt {
+  pub exp: Exp,
+}
+
+pub type Exp = LOrExp;
 
 #[derive(Debug)]
 pub enum LOrExp {
@@ -104,10 +108,24 @@ pub enum UnaryOp {
 #[derive(Debug)]
 pub enum PrimaryExp {
   Num(i32),
+  LVal(LVal),
   Paren(Box<Exp>),
 }
 
 #[derive(Debug)]
-pub struct Stmt {
-  pub exp: Exp,
+pub enum Decl {
+  Const(ConstDecl)
+}
+
+pub type ConstDecl = Vec<ConstDef>;
+
+#[derive(Debug)]
+pub struct ConstDef {
+  pub ident: String,
+  pub init_val: Box<Exp>,
+}
+
+#[derive(Debug)]
+pub enum LVal {
+  Ident(String)
 }

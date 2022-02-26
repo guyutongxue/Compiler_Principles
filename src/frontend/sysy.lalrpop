@@ -19,13 +19,24 @@ FuncDef: FuncDef = {
 
 FuncType: FuncType = "int" => FuncType::Int;
 
-Block: Block = "{" <stmt: Stmt> "}" => Block { <> };
+Block: Block = "{" <items: BlockItemList> "}" => <>;
+
+BlockItemList: Vec<BlockItem> = {
+  "" => vec![],
+  <item: BlockItem> => vec![item],
+  <list: BlockItemList> <item: BlockItem> => {
+    list.into_iter().chain(vec![item]).collect()
+  }
+}
+
+BlockItem: BlockItem = {
+  <decl: Decl> => BlockItem::Decl(decl),
+  <stmt: Stmt> => BlockItem::Stmt(stmt),
+}
 
 Stmt: Stmt = "return" <exp: Exp> ";" => Stmt { <> };
 
-Exp: Exp = {
-  <exp: LOrExp> => Exp::LOr(exp),
-}
+Exp: LOrExp = <exp: LOrExp> => exp;
 
 LOrExp: LOrExp = {
   <exp: LAndExp> => LOrExp::And(exp.into()),
@@ -109,15 +120,42 @@ UnaryOp: UnaryOp = {
 
 PrimaryExp: PrimaryExp = {
   "(" <exp: Exp> ")" => PrimaryExp::Paren(exp.into()),
+  <lval: LVal> => PrimaryExp::LVal(lval),
   <num: Number> => PrimaryExp::Num(num),
+}
+
+LVal: LVal = {
+  <ident: Ident> => LVal::Ident(ident),
 }
 
 Number: i32 = <num: IntConst> => <>;
 
-Ident: String = r"[_a-zA-Z][_a-zA-Z0-9]*" => <>.to_string();
+Ident: String = r"[_a-zA-Z][_a-zA-Z0-9]*" => <>.into();
 
 IntConst: i32 = {
   r"[1-9][0-9]*" => i32::from_str_radix(<>, 10).unwrap(),
   r"0[0-7]*" => i32::from_str_radix(<>, 8).unwrap(),
   r"0[xX][0-9a-fA-F]+" => i32::from_str_radix(&<>[2..], 16).unwrap(),
+}
+
+Decl: Decl = {
+  <decl: ConstDecl> => Decl::Const(decl),
+}
+
+ConstDecl: ConstDecl = "const" <btype: BType> <defs: ConstDefList> ";" => defs;
+
+BType: String = "int" => <>.into();
+
+ConstDefList: Vec<ConstDef> = {
+  <def: ConstDef> => vec![def],
+  <defs: ConstDefList> "," <def: ConstDef> => {
+    defs.into_iter().chain(vec![def]).collect()
+  },
+}
+
+ConstDef: ConstDef = {
+  <ident: Ident> "=" <init_val: Exp> => ConstDef {
+    ident: ident,
+    init_val: init_val.into(),
+  },
 }
