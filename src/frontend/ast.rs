@@ -22,9 +22,11 @@ pub enum BlockItem {
   Decl(Decl),
   Stmt(Stmt),
 }
+
 #[derive(Debug)]
-pub struct Stmt {
-  pub exp: Exp,
+pub enum Stmt {
+  Return(Box<Exp>),
+  Assign(LVal, Box<Exp>),
 }
 
 pub type Exp = LOrExp;
@@ -114,10 +116,12 @@ pub enum PrimaryExp {
 
 #[derive(Debug)]
 pub enum Decl {
-  Const(ConstDecl)
+  Const(ConstDecl),
+  Var(VarDecl),
 }
 
 pub type ConstDecl = Vec<ConstDef>;
+pub type VarDecl = Vec<VarDef>;
 
 #[derive(Debug)]
 pub struct ConstDef {
@@ -126,6 +130,18 @@ pub struct ConstDef {
 }
 
 #[derive(Debug)]
+pub struct VarDef {
+  pub ident: String,
+  pub init_val: Option<InitVal>,
+}
+
+#[derive(Debug)]
+pub enum InitVal {
+  Simple(Box<Exp>),
+  // Array(Vec<Box<Exp>>),
+}
+
+#[derive(Debug)]
 pub enum LVal {
-  Ident(String)
+  Ident(String),
 }

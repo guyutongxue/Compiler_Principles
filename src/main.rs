@@ -1,16 +1,21 @@
-use argparse::{ParsedArgs, Mode};
+use argparse::{Mode, ParsedArgs};
 use koopa::back::KoopaGenerator;
 use std::env::args;
 use std::error::Error;
 use std::fs;
 use std::io::{stdout, Write};
 
-mod frontend;
-mod backend;
 mod argparse;
+mod backend;
+mod frontend;
 
-fn compile(args: ParsedArgs) -> Result<(), Box<dyn Error>> {
-  let ParsedArgs { mode, input, output } = args;
+fn compile() -> Result<(), Box<dyn Error>> {
+  let ParsedArgs {
+    mode,
+    input,
+    output,
+  } = argparse::parse(args())?;
+  
   let input = fs::read_to_string(&input[0])?;
   let mut output: Box<dyn Write> = if output.is_none() {
     Box::new(stdout())
@@ -32,13 +37,9 @@ fn compile(args: ParsedArgs) -> Result<(), Box<dyn Error>> {
   Ok(())
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-  let args = argparse::parse(args())?;
-
-  compile(args).or_else(|e| {
+fn main() {
+  if let Err(e) = compile() {
     eprintln!("{}", e);
-    Err(e)
-  })?;
-
-  Ok(())
+    std::process::exit(1);
+  }
 }

@@ -131,10 +131,11 @@ impl Eval for LVal {
   fn eval(&self) -> Option<i32> {
     match self {
       LVal::Ident(ident) => {
-        let table = SYMBOLS.lock().unwrap();
+        let table = SYMBOLS.read().unwrap();
         let symbol = table.get(ident)?;
         match symbol {
-          Symbol::ConstSymbol(i) => Some(*i),
+          Symbol::Const(i) => Some(*i),
+          Symbol::Var(_) => None,
         }
       }
     }

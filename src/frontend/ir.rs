@@ -1,11 +1,11 @@
-use koopa::ir::builder::{BasicBlockBuilder, LocalInstBuilder};
+use koopa::ir::builder::BasicBlockBuilder;
 use koopa::ir::{FunctionData, Program, Type};
 use std::error::Error;
 
-use super::ast::{BlockItem, CompUnit};
+use super::ast::{BlockItem, CompUnit, Stmt};
 #[allow(unused_imports)]
 use super::error::{PushKeyError, UnimplementedError};
-use super::{expr, stmt};
+use super::stmt;
 
 pub fn generate_program(ast: CompUnit) -> Result<Program, Box<dyn Error>> {
   let mut program = Program::new();
@@ -37,6 +37,10 @@ pub fn generate_program(ast: CompUnit) -> Result<Program, Box<dyn Error>> {
   };
   for i in ast.func_def.block.iter() {
     stmt::generate(i, &mut context)?;
+    // Return should be the last statement
+    if let BlockItem::Stmt(Stmt::Return(_)) = i {
+      break;
+    }
   }
 
   Ok(program)

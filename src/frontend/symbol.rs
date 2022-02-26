@@ -1,10 +1,12 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::{collections::HashMap, sync::{RwLock}};
 
+use koopa::ir::Value;
 use once_cell::sync::Lazy;
 
 #[derive(Debug)]
 pub enum Symbol {
-  ConstSymbol(i32),
+  Const(i32),
+  Var(Value),
 }
 
-pub static SYMBOLS: Lazy<Mutex<HashMap<String, Symbol>>> = Lazy::new(|| Mutex::default());
+pub static SYMBOLS: Lazy<RwLock<HashMap<String, Symbol>>> = Lazy::new(|| RwLock::default());

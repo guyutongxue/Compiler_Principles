@@ -5,13 +5,17 @@ use koopa::ir::{BasicBlock, BinaryOp, Function, Program, Value};
 use std::error::Error;
 
 use super::consteval::Eval;
+use super::error::CompileError;
+use super::error::PushKeyError;
+
 #[allow(unused_imports)]
-use super::error::{PushKeyError, UnimplementedError};
+use super::error::UnimplementedError;
 
 use super::ast::{
   AddExp, AddOp, EqExp, EqOp, LAndExp, LOrExp, LVal, MulExp, MulOp, PrimaryExp, RelExp, RelOp,
   UnaryExp, UnaryOp,
 };
+use super::symbol::{Symbol, SYMBOLS};
 
 pub struct GenerateContext<'a> {
   pub program: &'a mut Program,
@@ -181,14 +185,7 @@ impl GenerateValue for MulExp {
 impl GenerateValue for UnaryExp {
   fn generate_value(&self, context: &mut GenerateContext) -> Result<Value, Box<dyn Error>> {
     match self {
-      UnaryExp::Primary(exp) => match exp {
-        PrimaryExp::Num(num) => {
-          let value = context.dfg().new_value().integer(*num);
-          Ok(value)
-        }
-        PrimaryExp::LVal(lval) => Err(UnimplementedError(format!("{:#?}", lval)))?,
-        PrimaryExp::Paren(exp) => generate(exp.as_ref(), context),
-      },
+      UnaryExp::Primary(exp) => exp.generate_value(context),
       UnaryExp::Op(op, exp) => match op {
         UnaryOp::Positive => generate(exp.as_ref(), context),
         UnaryOp::Negative => {
@@ -206,6 +203,40 @@ impl GenerateValue for UnaryExp {
           Ok(result)
         }
       },
+    }
+  }
+}
+
+impl GenerateValue for PrimaryExp {
+  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value, Box<dyn Error>> {
+    match self {
+      PrimaryExp::Paren(exp) => generate(exp.as_ref(), context),
+      PrimaryExp::Num(num) => {
+        let value = context.dfg().new_value().integer(*num);
+        Ok(value)
+      }
+      PrimaryExp::LVal(lval) => lval.generate_value(context),
+    }
+  }
+}
+
+impl GenerateValue for LVal {
+  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value, Box<dyn Error>> {
+    match self {
+      LVal::Ident(ident) => {
+        let table = SYMBOLS.read().unwrap();
+        let symbol = table
+          .get(ident)
+          .ok_or(CompileError(format!("Undefined variable: {}", ident)))?;
+        match symbol {
+          Symbol::Const(value) => Ok(context.dfg().new_value().integer(*value)),
+          Symbol::Var(alloc) => {
+            let load = context.dfg().new_value().load(*alloc);
+            context.add_inst(load)?;
+            Ok(load)
+          }
+        }
+      }
     }
   }
 }

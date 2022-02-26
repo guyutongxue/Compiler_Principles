@@ -30,31 +30,30 @@ BlockItemList: Vec<BlockItem> = {
 }
 
 BlockItem: BlockItem = {
-  <decl: Decl> => BlockItem::Decl(decl),
-  <stmt: Stmt> => BlockItem::Stmt(stmt),
+  <decl: Decl> => BlockItem::Decl(<>),
+  <stmt: Stmt> => BlockItem::Stmt(<>),
 }
 
-Stmt: Stmt = "return" <exp: Exp> ";" => Stmt { <> };
-
-Exp: LOrExp = <exp: LOrExp> => exp;
-
-LOrExp: LOrExp = {
-  <exp: LAndExp> => LOrExp::And(exp.into()),
-  <lhs: LOrExp> "||" <rhs: LAndExp> => LOrExp::Or(lhs.into(), rhs.into()),
+Stmt: Stmt = {
+  <lval: LVal> "=" <exp: Exp> ";" => Stmt::Assign(<>),
+  "return" <exp: Exp> ";" => Stmt::Return(<>),
 }
 
-LAndExp: LAndExp = {
-  <exp: EqExp> => LAndExp::Eq(exp.into()),
-  <lhs: LAndExp> "&&" <rhs: EqExp> => LAndExp::And(lhs.into(), rhs.into()),
+Exp: Box<LOrExp> = <exp: LOrExp> => exp;
+
+LOrExp: Box<LOrExp> = {
+  <exp: LAndExp> => LOrExp::And(<>).into(),
+  <lhs: LOrExp> "||" <rhs: LAndExp> => LOrExp::Or(<>).into(),
 }
 
-EqExp: EqExp = {
-  <exp: RelExp> => EqExp::Rel(exp.into()),
-  <lhs: EqExp> <op: EqOp> <rhs: RelExp> => EqExp::Eq(
-    lhs.into(), 
-    op, 
-    rhs.into()
-  ),
+LAndExp: Box<LAndExp> = {
+  <exp: EqExp> => LAndExp::Eq(<>).into(),
+  <lhs: LAndExp> "&&" <rhs: EqExp> => LAndExp::And(<>).into(),
+}
+
+EqExp: Box<EqExp> = {
+  <exp: RelExp> => EqExp::Rel(<>).into(),
+  <lhs: EqExp> <op: EqOp> <rhs: RelExp> => EqExp::Eq(<>).into(),
 }
 
 EqOp: EqOp = {
@@ -62,13 +61,9 @@ EqOp: EqOp = {
   "!=" => EqOp::NotEqual,
 }
 
-RelExp: RelExp = {
-  <exp: AddExp> => RelExp::Add(exp.into()),
-  <lhs: RelExp> <op: RelOp> <rhs: AddExp> => RelExp::Rel(
-    lhs.into(), 
-    op, 
-    rhs.into()
-  ),
+RelExp: Box<RelExp> = {
+  <exp: AddExp> => RelExp::Add(<>).into(),
+  <lhs: RelExp> <op: RelOp> <rhs: AddExp> => RelExp::Rel(<>).into(),
 }
 
 RelOp: RelOp = {
@@ -78,13 +73,9 @@ RelOp: RelOp = {
   ">=" => RelOp::GreaterEqual,
 }
 
-AddExp: AddExp = {
-  <exp: MulExp> => AddExp::Mul(exp.into()),
-  <lhs: AddExp> <op: AddOp> <rhs: MulExp> => AddExp::Add(
-    lhs.into(), 
-    op, 
-    rhs.into()
-  ),
+AddExp: Box<AddExp> = {
+  <exp: MulExp> => AddExp::Mul(<>).into(),
+  <lhs: AddExp> <op: AddOp> <rhs: MulExp> => AddExp::Add(<>).into(),
 }
 
 AddOp: AddOp = {
@@ -92,13 +83,9 @@ AddOp: AddOp = {
   "-" => AddOp::Minus,
 }
 
-MulExp: MulExp = {
-  <exp: UnaryExp> => MulExp::Unary(exp.into()),
-  <lhs: MulExp> <op: MulOp> <rhs: UnaryExp> => MulExp::Mul(
-    lhs.into(), 
-    op, 
-    rhs.into()
-  ),
+MulExp: Box<MulExp> = {
+  <exp: UnaryExp> => MulExp::Unary(<>).into(),
+  <lhs: MulExp> <op: MulOp> <rhs: UnaryExp> => MulExp::Mul(<>).into(),
 }
 
 MulOp: MulOp = {
@@ -107,9 +94,9 @@ MulOp: MulOp = {
   "%" => MulOp::Modulo,
 }
 
-UnaryExp: UnaryExp = {
-  <exp: PrimaryExp> => UnaryExp::Primary(exp),
-  <op: UnaryOp> <exp: UnaryExp> => UnaryExp::Op(op, exp.into()),
+UnaryExp: Box<UnaryExp> = {
+  <exp: PrimaryExp> => UnaryExp::Primary(exp).into(),
+  <op: UnaryOp> <exp: UnaryExp> => UnaryExp::Op(op, exp.into()).into(),
 }
 
 UnaryOp: UnaryOp = {
@@ -119,13 +106,13 @@ UnaryOp: UnaryOp = {
 }
 
 PrimaryExp: PrimaryExp = {
-  "(" <exp: Exp> ")" => PrimaryExp::Paren(exp.into()),
-  <lval: LVal> => PrimaryExp::LVal(lval),
-  <num: Number> => PrimaryExp::Num(num),
+  "(" <exp: Exp> ")" => PrimaryExp::Paren(<>.into()),
+  <lval: LVal> => PrimaryExp::LVal(<>),
+  <num: Number> => PrimaryExp::Num(<>),
 }
 
 LVal: LVal = {
-  <ident: Ident> => LVal::Ident(ident),
+  <ident: Ident> => LVal::Ident(<>),
 }
 
 Number: i32 = <num: IntConst> => <>;
@@ -140,14 +127,17 @@ IntConst: i32 = {
 
 Decl: Decl = {
   <decl: ConstDecl> => Decl::Const(decl),
+  <decl: VarDecl> => Decl::Var(decl)
 }
 
 ConstDecl: ConstDecl = "const" <btype: BType> <defs: ConstDefList> ";" => defs;
 
+VarDecl: VarDecl = <btype: BType> <defs: VarDefList> ";" => defs;
+
 BType: String = "int" => <>.into();
 
 ConstDefList: Vec<ConstDef> = {
-  <def: ConstDef> => vec![def],
+  <def: ConstDef> => vec![<>],
   <defs: ConstDefList> "," <def: ConstDef> => {
     defs.into_iter().chain(vec![def]).collect()
   },
@@ -158,4 +148,26 @@ ConstDef: ConstDef = {
     ident: ident,
     init_val: init_val.into(),
   },
+}
+
+VarDefList: Vec<VarDef> = {
+  <def: VarDef> => vec![<>],
+  <defs: VarDefList> "," <def: VarDef> => {
+    defs.into_iter().chain(vec![def]).collect()
+  },
+}
+
+VarDef: VarDef = {
+  <ident: Ident> => VarDef { 
+    <>,
+    init_val: None
+  },
+  <ident: Ident> "=" <init_val: InitVal> => VarDef {
+    ident: ident,
+    init_val: Some(init_val.into()),
+  },
+}
+
+InitVal: InitVal = {
+  <exp: Exp> => InitVal::Simple(<>.into()),
 }
