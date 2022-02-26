@@ -1,61 +1,53 @@
 use koopa::ir::{BinaryOp, Value, ValueKind};
 use std::error::Error;
 
-use super::from_func::GenerateContext;
 use super::error::*;
+use super::from_func::GenerateContext;
 use super::riscv::inst::Inst;
 use super::riscv::reg::Reg;
-
-pub static TEMP_REGS: &[Reg] = &[
-  Reg::T0,
-  Reg::T1,
-  Reg::T2,
-  Reg::T3,
-  Reg::T4,
-  Reg::T5,
-  Reg::T6,
-  Reg::A0,
-  Reg::A1,
-  Reg::A2,
-  Reg::A3,
-  Reg::A4,
-  Reg::A5,
-  Reg::A6,
-  Reg::A7,
-];
 
 pub fn generate(v: Value, context: &mut GenerateContext) -> Result<(), Box<dyn Error>> {
   v.generate(context)
 }
 
 impl<'a> GenerateContext<'a> {
-
   fn push_inst(&mut self, inst: Inst) {
     self.insts.push(inst.to_string());
   }
 
-  fn get_reg_from_value(&mut self, value: Value) -> Result<Reg, Box<dyn Error>> {
-    if let Some(reg) = self.regs.get(&value) {
-      return Ok(*reg);
+  fn get_offset(&mut self, value: Value) -> Result<i32, Box<dyn Error>> {
+    if let Some(offset) = self.offsets.get(&value) {
+      Ok(*offset) 
+    } else {
+      let offset = self.next_offset.next().ok_or(StackOverflowError)?;
+      self.offsets.insert(value, offset);
+      Ok(offset)
     }
+  }
+
+  fn load_value_to_reg(&mut self, value: Value, reg: &mut Reg) -> Result<(), Box<dyn Error>> {
     if let ValueKind::Integer(integer) = self.func_data.dfg().value(value).kind() {
-      // Alloc a register for storing this integer.
+      // Alloc a register for storing a integer.
       let integer = integer.value();
       if integer != 0 {
         // For non-zero value, use a temp register, then `li` the immediate into it.
-        let reg = *self.next_reg.next().ok_or(OutOfRegistersError)?;
-        self.regs.insert(value, reg);
-        self.push_inst(Inst::Li(reg, integer));
-        Ok(reg)
+        self.push_inst(Inst::Li(*reg, integer));
       } else {
         // For zero, use `zero` register.
-        Ok(Reg::Zero)
+        *reg = Reg::Zero;
       }
     } else {
-      let reg = *self.next_reg.next().ok_or(OutOfRegistersError)?;
-      self.regs.insert(value, reg);
-      Ok(reg)
+      // Load the value from stack.
+      let offset = self.get_offset(value)?;
+      self.push_inst(Inst::Lw(*reg, offset, Reg::Sp));
     }
+    Ok(())
+  }
+
+  fn save_value_from_reg(&mut self, value: Value, reg: Reg) -> Result<(), Box<dyn Error>> {
+    let offset = self.get_offset(value)?;
+    self.push_inst(Inst::Sw(reg, offset, Reg::Sp));
+    Ok(())
   }
 }
 
@@ -69,80 +61,88 @@ impl GenerateAsmDetail for Value {
     match data.kind() {
       ValueKind::Binary(binary) => {
         let lhs = binary.lhs();
-        let rs1 = context.get_reg_from_value(lhs)?;
+        let mut rs1 = Reg::T0;
+        context.load_value_to_reg(lhs, &mut rs1)?;
         let rhs = binary.rhs();
-        let rs2 = context.get_reg_from_value(rhs)?;
-        let rd = if rs2 == Reg::Zero {
-          context.get_reg_from_value(self)?
-        } else {
-          rs2
-        };
+        let mut rs2 = Reg::T1;
+        context.load_value_to_reg(rhs, &mut rs2)?;
+        let rd = Reg::T2;
         match binary.op() {
           BinaryOp::And => {
             context.push_inst(Inst::And(rd, rs1, rs2));
-            context.regs.insert(self, rd);
           }
           BinaryOp::Or => {
             context.push_inst(Inst::Or(rd, rs1, rs2));
-            context.regs.insert(self, rd);
           }
           BinaryOp::Eq => {
             context.push_inst(Inst::Xor(rd, rs1, rs2));
             context.push_inst(Inst::Seqz(rd, rd));
-            context.regs.insert(self, rd);
           }
           BinaryOp::NotEq => {
             context.push_inst(Inst::Xor(rd, rs1, rs2));
             context.push_inst(Inst::Snez(rd, rd));
-            context.regs.insert(self, rd);
           }
           BinaryOp::Lt => {
             context.push_inst(Inst::Slt(rd, rs1, rs2));
-            context.regs.insert(self, rd);
           }
           BinaryOp::Gt => {
             context.push_inst(Inst::Sgt(rd, rs1, rs2));
-            context.regs.insert(self, rd);
           }
           BinaryOp::Le => {
             context.push_inst(Inst::Sgt(rd, rs1, rs2));
             context.push_inst(Inst::Seqz(rd, rd));
-            context.regs.insert(self, rd);
           }
           BinaryOp::Ge => {
             context.push_inst(Inst::Slt(rd, rs1, rs2));
             context.push_inst(Inst::Seqz(rd, rd));
-            context.regs.insert(self, rd);
           }
           BinaryOp::Add => {
             context.push_inst(Inst::Add(rd, rs1, rs2));
-            context.regs.insert(self, rd);
           }
           BinaryOp::Sub => {
             context.push_inst(Inst::Sub(rd, rs1, rs2));
-            context.regs.insert(self, rd);
           }
           BinaryOp::Mul => {
             context.push_inst(Inst::Mul(rd, rs1, rs2));
-            context.regs.insert(self, rd);
           }
           BinaryOp::Div => {
             context.push_inst(Inst::Div(rd, rs1, rs2));
-            context.regs.insert(self, rd);
           }
           BinaryOp::Mod => {
             context.push_inst(Inst::Rem(rd, rs1, rs2));
-            context.regs.insert(self, rd);
           }
           x => return Err(UnimplementedError(Box::from(x)).into()),
         }
+        context.save_value_from_reg(self, rd)?;
       }
-
       ValueKind::Return(ret) => {
         let retval = ret.value().ok_or("no return value")?;
-        let rs = context.get_reg_from_value(retval)?;
-        context.push_inst(Inst::Mv(Reg::A0, rs));
+        let mut rs = Reg::A0;
+        context.load_value_to_reg(retval, &mut rs)?;
+        if rs != Reg::A0 {
+          context.push_inst(Inst::Mv(Reg::A0, rs));
+        }
+
+        // EPILOGUE
+        context.push_inst(Inst::Addi(Reg::Sp, Reg::Sp, context.frame_size));
+
         context.push_inst(Inst::Ret);
+      }
+      ValueKind::Alloc(_) => {
+        context.get_offset(self)?;
+      }
+      ValueKind::Store(store) => {
+        let mut reg = Reg::T0;
+        let value = store.value();
+        let dest = store.dest();
+        context.load_value_to_reg(value, &mut reg)?;
+        context.save_value_from_reg(dest, reg)?;
+      }
+      ValueKind::Load(load) => {
+        let mut reg = Reg::T0;
+        let src = load.src();
+        context.load_value_to_reg(src, &mut reg)?;
+        context.save_value_from_reg(self, reg)?;
       }
       x => return Err(UnimplementedError(Box::from(x.clone())).into()),
     }

@@ -1,22 +1,45 @@
-use std::{collections::HashMap, error::Error};
+use std::{collections::HashMap, error::Error, iter};
 
+use super::from_value;
+use super::riscv::{inst::Inst, reg::Reg};
 use koopa::ir::{FunctionData, Value};
-use super::{from_value, riscv::reg::Reg};
 
 pub struct GenerateContext<'a> {
-  pub regs: HashMap<Value, Reg>,
-  pub next_reg: core::slice::Iter<'static, Reg>,
+  pub offsets: HashMap<Value, i32>,
+  pub next_offset: Box<dyn Iterator<Item = i32>>,
+  pub frame_size: i32,
   pub func_data: &'a FunctionData,
   pub insts: Vec<String>,
 }
 
 impl<'a> GenerateContext<'a> {
   fn from(func: &'a FunctionData) -> Self {
+    let inst_num = func
+      .dfg()
+      .values()
+      .values()
+      .filter(|vd| !vd.ty().is_unit())
+      .count() as i32;
+    let size = (inst_num * 4 + 15) & !15;
+    let mut cnt = size;
+    let counter = iter::from_fn(move || {
+      cnt -= 4;
+      if cnt < 0 {
+        None
+      } else {
+        Some(cnt)
+      }
+    });
+
+    // PROLOGUE
+    let prologue = Inst::Addi(Reg::Sp, Reg::Sp, -size).to_string();
+
     Self {
-      regs: HashMap::new(),
-      next_reg: from_value::TEMP_REGS.iter(),
+      offsets: HashMap::new(),
+      next_offset: Box::new(counter),
+      frame_size: size,
       func_data: func,
-      insts: vec![],
+      insts: vec![prologue],
     }
   }
 }

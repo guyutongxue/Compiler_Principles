@@ -13,12 +13,12 @@ impl fmt::Display for UnimplementedError {
 }
 
 #[derive(Debug)]
-pub struct OutOfRegistersError;
+pub struct StackOverflowError;
 
-impl Error for OutOfRegistersError {}
+impl Error for StackOverflowError {}
 
-impl fmt::Display for OutOfRegistersError {
+impl fmt::Display for StackOverflowError {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-    write!(f, "out of registers")
+    write!(f, "stack overflow")
   }
 }
