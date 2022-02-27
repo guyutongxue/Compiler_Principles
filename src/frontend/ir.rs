@@ -1,7 +1,7 @@
-use koopa::ir::builder::BasicBlockBuilder;
+use koopa::ir::builder::{BasicBlockBuilder, LocalInstBuilder, ValueBuilder};
 use koopa::ir::dfg::DataFlowGraph;
 use koopa::ir::layout::{InstList, Layout};
-use koopa::ir::{BasicBlock, Function, FunctionData, Program, Type, Value};
+use koopa::ir::{BasicBlock, Function, FunctionData, Program, Type, Value, TypeKind};
 use std::error::Error;
 
 use super::ast::CompUnit;
@@ -17,6 +17,9 @@ pub struct GenerateContext<'a> {
   pub symbol: SymbolTable,
 
   next_bb_no: Box<dyn Iterator<Item = i32>>,
+
+  /// 循环中 break/continue 跳转位置
+  pub loop_jump_pt: Vec<(BasicBlock, BasicBlock)>,
 }
 
 impl<'a> GenerateContext<'a> {
@@ -46,6 +49,7 @@ impl<'a> GenerateContext<'a> {
       bb: Some(entry),
       symbol: SymbolTable::new(),
       next_bb_no: Box::new(0..),
+      loop_jump_pt: vec![],
     })
   }
 
@@ -73,13 +77,10 @@ impl<'a> GenerateContext<'a> {
 
   pub fn add_inst(&mut self, value: Value) -> Result<(), Box<dyn Error>> {
     if let Some(bb) = self.bb {
-      self
-        .insts(bb)
-        .push_key_back(value)
-        .map_err(|k| {
-          let vd = self.dfg().value(k).clone();
-          PushKeyError(Box::new(vd))
-        })?;
+      self.insts(bb).push_key_back(value).map_err(|k| {
+        let vd = self.dfg().value(k).clone();
+        PushKeyError(Box::new(vd))
+      })?;
     }
     Ok(())
   }
@@ -104,5 +105,37 @@ pub fn generate_program(ast: CompUnit) -> Result<Program, Box<dyn Error>> {
     stmt::generate(i, &mut context)?;
   }
 
+  for (_, fd) in program.funcs_mut().iter_mut() {
+    patch_no_return_ub(fd);
+  }
+
   Ok(program)
+}
+
+/// Add a return instruction for each empty bb.
+/// See https://github.com/pku-minic/compiler-dev-test-cases/issues/1
+fn patch_no_return_ub(fd: &mut FunctionData) {
+  let empty_bbs: Vec<BasicBlock> = fd
+    .layout()
+    .bbs()
+    .iter()
+    .filter(|(_, bbn)| bbn.insts().len() == 0)
+    .map(|(bb, _)| bb.clone())
+    .collect();
+
+  for bb in empty_bbs {
+    if let TypeKind::Function(_, ret_type) = fd.ty().kind() {
+      let ret = if *ret_type == Type::get_i32() {
+        let retval = fd.dfg_mut().new_value().integer(0);
+        fd.dfg_mut().new_value().ret(Some(retval))
+      } else {
+        fd.dfg_mut().new_value().ret(None)
+      };
+      fd.layout_mut()
+        .bb_mut(bb)
+        .insts_mut()
+        .push_key_back(ret)
+        .unwrap();
+    }
+  }
 }

@@ -40,12 +40,15 @@ Stmt: Stmt = {
   <s: PrimaryStmt> => <>,
   <s: IfStmt> => <>,
   <s: IfElseStmt> => <>,
+  <s: WhileStmt> => <>,
 }
 
 PrimaryStmt: Stmt = {
   <s: Block> => Stmt::Block(<>.into()),
   <s: AssignAndExprStmt> => <>,
   <s: ReturnStmt> => <>,
+  "break" ";" => Stmt::Break,
+  "continue" ";" => Stmt::Continue,
 }
 
 /// 关于“悬垂 Else”问题的说明:
@@ -62,12 +65,7 @@ PrimaryStmt: Stmt = {
 StmtNoShortIf: Stmt = {
   <s: PrimaryStmt> => <>,
   <s: IfElseStmtNoShortIf> => <>,
-}
-
-AssignAndExprStmt: Stmt = {
-  <lval: LVal> "=" <exp: Exp> ";" => Stmt::Assign(<>),
-  ";" => Stmt::Exp(None),
-  <exp: Exp> ";" => Stmt::Exp(Some(<>)),
+  <s: WhileStmtNoShortIf> => <>,
 }
 
 IfStmt: Stmt = {
@@ -92,6 +90,26 @@ IfElseStmtNoShortIf: Stmt = {
     stmt.into(), 
     Some(else_stmt.into())
   ),
+}
+
+WhileStmt: Stmt = {
+  "while" "(" <exp: Exp> ")" <stmt: Stmt> => Stmt::While(
+    exp,
+    stmt.into(),
+  ),
+}
+
+WhileStmtNoShortIf: Stmt = {
+  "while" "(" <exp: Exp> ")" <stmt: StmtNoShortIf> => Stmt::While(
+    exp,
+    stmt.into(),
+  ),
+}
+
+AssignAndExprStmt: Stmt = {
+  <lval: LVal> "=" <exp: Exp> ";" => Stmt::Assign(<>),
+  ";" => Stmt::Exp(None),
+  <exp: Exp> ";" => Stmt::Exp(Some(<>)),
 }
 
 ReturnStmt: Stmt = {

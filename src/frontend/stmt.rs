@@ -81,6 +81,40 @@ impl GenerateStmt for Stmt {
         let jump = context.dfg().new_value().jump(end_bb);
         context.switch_bb(jump, Some(end_bb))?;
       }
+      Stmt::While(exp, stmt) => {
+        let entry_bb = context.add_bb()?;
+        let body_bb = context.add_bb()?;
+        let end_bb = context.add_bb()?;
+
+        let jump_into_entry = context.dfg().new_value().jump(entry_bb);
+        context.switch_bb(jump_into_entry, Some(entry_bb))?;
+
+        let cond = expr::generate(exp.as_ref(), context)?;
+        let br = context.dfg().new_value().branch(cond, body_bb, end_bb);
+        context.switch_bb(br, Some(body_bb))?;
+
+        context.loop_jump_pt.push((end_bb, entry_bb));
+        stmt.generate(context)?;
+        context.loop_jump_pt.pop();
+        let jump = context.dfg().new_value().jump(entry_bb);
+        context.switch_bb(jump, Some(end_bb))?;
+      }
+      Stmt::Break => {
+        if context.loop_jump_pt.len() == 0 {
+          Err(CompileError("Cannot break outside of loop".into()))?;
+        }
+        let (end_bb, _) = context.loop_jump_pt.last().unwrap().clone();
+        let jump = context.dfg().new_value().jump(end_bb);
+        context.switch_bb(jump, None)?;
+      }
+      Stmt::Continue => {
+        if context.loop_jump_pt.len() == 0 {
+          Err(CompileError("Cannot continue outside of loop".into()))?;
+        }
+        let (_, entry_bb) = context.loop_jump_pt.last().unwrap().clone();
+        let jump = context.dfg().new_value().jump(entry_bb);
+        context.switch_bb(jump, None)?;
+      }
       Stmt::Return(exp) => {
         let ret_val = expr::generate(exp.as_ref(), context)?;
         let ret = context.dfg().new_value().ret(Some(ret_val));
