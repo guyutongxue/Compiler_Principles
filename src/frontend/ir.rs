@@ -6,6 +6,7 @@ use super::ast::{BlockItem, CompUnit, Stmt};
 #[allow(unused_imports)]
 use super::error::{PushKeyError, UnimplementedError};
 use super::stmt;
+use super::symbol::SymbolTable;
 
 pub fn generate_program(ast: CompUnit) -> Result<Program, Box<dyn Error>> {
   let mut program = Program::new();
@@ -34,10 +35,11 @@ pub fn generate_program(ast: CompUnit) -> Result<Program, Box<dyn Error>> {
     program: &mut program,
     func: main,
     bb: entry,
+    symbol: SymbolTable::new()
   };
   for i in ast.func_def.block.iter() {
     stmt::generate(i, &mut context)?;
-    // Return should be the last statement
+    // Return should be the last instruction
     if let BlockItem::Stmt(Stmt::Return(_)) = i {
       break;
     }

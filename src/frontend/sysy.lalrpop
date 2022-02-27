@@ -19,10 +19,12 @@ FuncDef: FuncDef = {
 
 FuncType: FuncType = "int" => FuncType::Int;
 
-Block: Block = "{" <items: BlockItemList> "}" => <>;
+Block: Block = {
+  "{" "}" => vec![],
+  "{" <items: BlockItemList> "}" => <>,
+}
 
 BlockItemList: Vec<BlockItem> = {
-  "" => vec![],
   <item: BlockItem> => vec![item],
   <list: BlockItemList> <item: BlockItem> => {
     list.into_iter().chain(vec![item]).collect()
@@ -36,6 +38,9 @@ BlockItem: BlockItem = {
 
 Stmt: Stmt = {
   <lval: LVal> "=" <exp: Exp> ";" => Stmt::Assign(<>),
+  ";" => Stmt::Exp(None),
+  <exp: Exp> ";" => Stmt::Exp(Some(<>)),
+  <block: Block> => Stmt::Block(<>.into()),
   "return" <exp: Exp> ";" => Stmt::Return(<>),
 }
 

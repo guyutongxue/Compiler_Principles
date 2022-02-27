@@ -15,12 +15,13 @@ use super::ast::{
   AddExp, AddOp, EqExp, EqOp, LAndExp, LOrExp, LVal, MulExp, MulOp, PrimaryExp, RelExp, RelOp,
   UnaryExp, UnaryOp,
 };
-use super::symbol::{Symbol, SYMBOLS};
+use super::symbol::{Symbol, SymbolTable};
 
 pub struct GenerateContext<'a> {
   pub program: &'a mut Program,
   pub func: Function,
   pub bb: BasicBlock,
+  pub symbol: SymbolTable,
 }
 
 impl<'a> GenerateContext<'a> {
@@ -50,7 +51,7 @@ pub fn generate<EvalExp: Eval + GenerateValue>(
   context: &mut GenerateContext,
 ) -> Result<Value, Box<dyn Error>> {
   // consteval
-  if let Some(value) = exp.eval() {
+  if let Some(value) = exp.eval(context) {
     let result = context.dfg().new_value().integer(value);
     return Ok(result);
   }
@@ -224,14 +225,14 @@ impl GenerateValue for LVal {
   fn generate_value(&self, context: &mut GenerateContext) -> Result<Value, Box<dyn Error>> {
     match self {
       LVal::Ident(ident) => {
-        let table = SYMBOLS.read().unwrap();
-        let symbol = table
+        let symbol = context
+          .symbol
           .get(ident)
           .ok_or(CompileError(format!("Undefined variable: {}", ident)))?;
         match symbol {
-          Symbol::Const(value) => Ok(context.dfg().new_value().integer(*value)),
+          Symbol::Const(value) => Ok(context.dfg().new_value().integer(value)),
           Symbol::Var(alloc) => {
-            let load = context.dfg().new_value().load(*alloc);
+            let load = context.dfg().new_value().load(alloc);
             context.add_inst(load)?;
             Ok(load)
           }

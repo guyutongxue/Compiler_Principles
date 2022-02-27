@@ -20,7 +20,7 @@ impl Error for CompileError {}
 
 impl fmt::Display for CompileError {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-    write!(f, "{}", self.0)
+    write!(f, "\x1b[0;31mCompile Error\x1b[0m {}", self.0)
   }
 }
 

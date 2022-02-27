@@ -5,21 +5,32 @@ use super::riscv::{inst::Inst, reg::Reg};
 use koopa::ir::{FunctionData, Value};
 
 pub struct GenerateContext<'a> {
+  /// 变量到内存位置（距离栈指针偏差）的映射
   pub offsets: HashMap<Value, i32>,
+  /// 下一个映射位置（分配局部变量时使用）
   pub next_offset: Box<dyn Iterator<Item = i32>>,
+  /// 栈帧大小
   pub frame_size: i32,
+  /// IR 数据
   pub func_data: &'a FunctionData,
+  /// 已生成指令序列
   pub insts: Vec<String>,
 }
 
 impl<'a> GenerateContext<'a> {
   fn from(func: &'a FunctionData) -> Self {
-    let inst_num = func
-      .dfg()
-      .values()
-      .values()
-      .filter(|vd| !vd.ty().is_unit())
-      .count() as i32;
+    let inst_num: i32 = func
+      .layout()
+      .bbs()
+      .iter()
+      .map(|(_, node)| {
+        node
+          .insts()
+          .iter()
+          .filter(|(v, _)| !func.dfg().value(**v).ty().is_unit())
+          .count() as i32
+      })
+      .sum();
     let size = (inst_num * 4 + 15) & !15;
     let mut cnt = size;
     let counter = iter::from_fn(move || {

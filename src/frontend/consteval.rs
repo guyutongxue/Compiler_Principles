@@ -2,19 +2,20 @@ use super::ast::{
   AddExp, AddOp, EqExp, EqOp, LAndExp, LOrExp, LVal, MulExp, MulOp, PrimaryExp, RelExp, RelOp,
   UnaryExp, UnaryOp,
 };
-use super::symbol::{SYMBOLS, Symbol};
+use super::expr::GenerateContext;
+use super::symbol::Symbol;
 
 pub trait Eval {
-  fn eval(&self) -> Option<i32>;
+  fn eval(&self, context: &GenerateContext) -> Option<i32>;
 }
 
 impl Eval for LOrExp {
-  fn eval(&self) -> Option<i32> {
+  fn eval(&self, context: &GenerateContext) -> Option<i32> {
     match self {
-      LOrExp::And(exp) => exp.eval(),
+      LOrExp::And(exp) => exp.eval(context),
       LOrExp::Or(lhs, rhs) => {
-        let lhs = lhs.eval()? != 0;
-        let rhs = rhs.eval()? != 0;
+        let lhs = lhs.eval(context)? != 0;
+        let rhs = rhs.eval(context)? != 0;
         Some((lhs || rhs) as i32)
       }
     }
@@ -22,12 +23,12 @@ impl Eval for LOrExp {
 }
 
 impl Eval for LAndExp {
-  fn eval(&self) -> Option<i32> {
+  fn eval(&self, context: &GenerateContext) -> Option<i32> {
     match self {
-      LAndExp::Eq(exp) => exp.eval(),
+      LAndExp::Eq(exp) => exp.eval(context),
       LAndExp::And(lhs, rhs) => {
-        let lhs = lhs.eval()? != 0;
-        let rhs = rhs.eval()? != 0;
+        let lhs = lhs.eval(context)? != 0;
+        let rhs = rhs.eval(context)? != 0;
         Some((lhs && rhs) as i32)
       }
     }
@@ -35,12 +36,12 @@ impl Eval for LAndExp {
 }
 
 impl Eval for EqExp {
-  fn eval(&self) -> Option<i32> {
+  fn eval(&self, context: &GenerateContext) -> Option<i32> {
     match self {
-      EqExp::Rel(exp) => exp.eval(),
+      EqExp::Rel(exp) => exp.eval(context),
       EqExp::Eq(lhs, op, rhs) => {
-        let lhs = lhs.eval()?;
-        let rhs = rhs.eval()?;
+        let lhs = lhs.eval(context)?;
+        let rhs = rhs.eval(context)?;
         match op {
           EqOp::Equal => Some((lhs == rhs) as i32),
           EqOp::NotEqual => Some((lhs != rhs) as i32),
@@ -51,12 +52,12 @@ impl Eval for EqExp {
 }
 
 impl Eval for RelExp {
-  fn eval(&self) -> Option<i32> {
+  fn eval(&self, context: &GenerateContext) -> Option<i32> {
     match self {
-      RelExp::Add(exp) => exp.eval(),
+      RelExp::Add(exp) => exp.eval(context),
       RelExp::Rel(lhs, op, rhs) => {
-        let lhs = lhs.eval()?;
-        let rhs = rhs.eval()?;
+        let lhs = lhs.eval(context)?;
+        let rhs = rhs.eval(context)?;
         match op {
           RelOp::Less => Some((lhs < rhs) as i32),
           RelOp::LessEqual => Some((lhs <= rhs) as i32),
@@ -69,12 +70,12 @@ impl Eval for RelExp {
 }
 
 impl Eval for AddExp {
-  fn eval(&self) -> Option<i32> {
+  fn eval(&self, context: &GenerateContext) -> Option<i32> {
     match self {
-      AddExp::Mul(exp) => exp.eval(),
+      AddExp::Mul(exp) => exp.eval(context),
       AddExp::Add(lhs, op, rhs) => {
-        let lhs = lhs.eval()?;
-        let rhs = rhs.eval()?;
+        let lhs = lhs.eval(context)?;
+        let rhs = rhs.eval(context)?;
         match op {
           AddOp::Plus => Some(lhs + rhs),
           AddOp::Minus => Some(lhs - rhs),
@@ -85,12 +86,12 @@ impl Eval for AddExp {
 }
 
 impl Eval for MulExp {
-  fn eval(&self) -> Option<i32> {
+  fn eval(&self, context: &GenerateContext) -> Option<i32> {
     match self {
-      MulExp::Unary(exp) => exp.eval(),
+      MulExp::Unary(exp) => exp.eval(context),
       MulExp::Mul(lhs, op, rhs) => {
-        let lhs = lhs.eval()?;
-        let rhs = rhs.eval()?;
+        let lhs = lhs.eval(context)?;
+        let rhs = rhs.eval(context)?;
         match op {
           MulOp::Multiply => Some(lhs * rhs),
           MulOp::Divide => Some(lhs / rhs),
@@ -102,11 +103,11 @@ impl Eval for MulExp {
 }
 
 impl Eval for UnaryExp {
-  fn eval(&self) -> Option<i32> {
+  fn eval(&self, context: &GenerateContext) -> Option<i32> {
     match self {
-      UnaryExp::Primary(exp) => exp.eval(),
+      UnaryExp::Primary(exp) => exp.eval(context),
       UnaryExp::Op(op, exp) => {
-        let exp = exp.eval()?;
+        let exp = exp.eval(context)?;
         match op {
           UnaryOp::Positive => Some(exp),
           UnaryOp::Negative => Some(-exp),
@@ -118,23 +119,22 @@ impl Eval for UnaryExp {
 }
 
 impl Eval for PrimaryExp {
-  fn eval(&self) -> Option<i32> {
+  fn eval(&self, context: &GenerateContext) -> Option<i32> {
     match self {
-      PrimaryExp::LVal(lval) => lval.eval(),
+      PrimaryExp::LVal(lval) => lval.eval(context),
       PrimaryExp::Num(i) => Some(*i),
-      PrimaryExp::Paren(exp) => exp.eval(),
+      PrimaryExp::Paren(exp) => exp.eval(context),
     }
   }
 }
 
 impl Eval for LVal {
-  fn eval(&self) -> Option<i32> {
+  fn eval(&self, context: &GenerateContext) -> Option<i32> {
     match self {
       LVal::Ident(ident) => {
-        let table = SYMBOLS.read().unwrap();
-        let symbol = table.get(ident)?;
+        let symbol = context.symbol.get(ident)?;
         match symbol {
-          Symbol::Const(i) => Some(*i),
+          Symbol::Const(i) => Some(i),
           Symbol::Var(_) => None,
         }
       }

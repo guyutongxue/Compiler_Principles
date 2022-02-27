@@ -25,8 +25,10 @@ pub enum BlockItem {
 
 #[derive(Debug)]
 pub enum Stmt {
-  Return(Box<Exp>),
   Assign(LVal, Box<Exp>),
+  Exp(Option<Box<Exp>>),
+  Block(Box<Block>),
+  Return(Box<Exp>),
 }
 
 pub type Exp = LOrExp;
