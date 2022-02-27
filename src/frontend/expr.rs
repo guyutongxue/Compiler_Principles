@@ -1,5 +1,5 @@
 use koopa::ir::builder::{LocalInstBuilder, ValueBuilder};
-use koopa::ir::{BinaryOp, Value};
+use koopa::ir::{BinaryOp, Type, Value};
 use std::error::Error;
 
 use super::ast::{
@@ -31,22 +31,70 @@ pub trait GenerateValue {
   fn generate_value(&self, context: &mut GenerateContext) -> Result<Value, Box<dyn Error>>;
 }
 
+enum ShortCircuitingOp {
+  Or,
+  And,
+}
+
+fn generate_with_short_circuiting<EvalExp1, EvalExp2>(
+  context: &mut GenerateContext,
+  lhs: &EvalExp1,
+  op: ShortCircuitingOp,
+  rhs: &EvalExp2,
+) -> Result<Value, Box<dyn Error>>
+where
+  EvalExp1: GenerateValue,
+  EvalExp2: GenerateValue,
+{
+  let zero = context.dfg().new_value().integer(0);
+  let one = context.dfg().new_value().integer(1);
+
+  let result = context.dfg().new_value().alloc(Type::get_i32());
+  let init_value = match op {
+    ShortCircuitingOp::Or => one,
+    ShortCircuitingOp::And => zero,
+  };
+  let init_result = context.dfg().new_value().store(init_value, result);
+
+  let lhs = lhs.generate_value(context)?;
+  let branch_op = match op {
+    ShortCircuitingOp::Or => BinaryOp::Eq,
+    ShortCircuitingOp::And => BinaryOp::NotEq,
+  };
+  let lhs_op_zero = context.dfg().new_value().binary(branch_op, lhs, zero);
+
+  let true_bb = context.add_bb()?;
+  let end_bb = context.add_bb()?;
+  let branch = context
+    .dfg()
+    .new_value()
+    .branch(lhs_op_zero, true_bb, end_bb);
+
+  let rhs = rhs.generate_value(context)?;
+  let rhs_neq_zero = context.dfg().new_value().binary(BinaryOp::NotEq, rhs, zero);
+  let rhs_store = context.dfg().new_value().store(rhs, result);
+
+  let jump = context.dfg().new_value().jump(end_bb);
+  let load = context.dfg().new_value().load(result);
+
+  context.add_inst(result)?;
+  context.add_inst(init_result)?;
+  context.add_inst(lhs_op_zero)?;
+  context.switch_bb(branch, Some(true_bb))?;
+  context.add_inst(rhs_neq_zero)?;
+  context.add_inst(rhs_store)?;
+  context.switch_bb(jump, Some(end_bb))?;
+  context.add_inst(load)?;
+
+  Ok(load)
+}
+
 impl GenerateValue for LOrExp {
   fn generate_value(&self, context: &mut GenerateContext) -> Result<Value, Box<dyn Error>> {
     match self {
       LOrExp::And(exp) => generate(exp.as_ref(), context),
       LOrExp::Or(lhs, rhs) => {
-        let zero = context.dfg().new_value().integer(0);
-        let lhs = generate(lhs.as_ref(), context)?;
-        let rhs = generate(rhs.as_ref(), context)?;
-        let result = context.dfg().new_value().binary(BinaryOp::Or, lhs, rhs);
-        context.add_inst(result)?;
-        let result = context
-          .dfg()
-          .new_value()
-          .binary(BinaryOp::NotEq, result, zero);
-        context.add_inst(result)?;
-        Ok(result)
+        generate_with_short_circuiting(context, lhs.as_ref(), ShortCircuitingOp::Or, rhs.as_ref())
       }
     }
   }
@@ -57,16 +105,7 @@ impl GenerateValue for LAndExp {
     match self {
       LAndExp::Eq(exp) => generate(exp.as_ref(), context),
       LAndExp::And(lhs, rhs) => {
-        let zero = context.dfg().new_value().integer(0);
-        let lhs = generate(lhs.as_ref(), context)?;
-        let lhs = context.dfg().new_value().binary(BinaryOp::NotEq, lhs, zero);
-        context.add_inst(lhs)?;
-        let rhs = generate(rhs.as_ref(), context)?;
-        let rhs = context.dfg().new_value().binary(BinaryOp::NotEq, rhs, zero);
-        context.add_inst(rhs)?;
-        let result = context.dfg().new_value().binary(BinaryOp::And, lhs, rhs);
-        context.add_inst(result)?;
-        Ok(result)
+        generate_with_short_circuiting(context, lhs.as_ref(), ShortCircuitingOp::And, rhs.as_ref())
       }
     }
   }

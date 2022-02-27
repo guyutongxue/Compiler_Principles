@@ -4,7 +4,7 @@ use koopa::ir::layout::{InstList, Layout};
 use koopa::ir::{BasicBlock, Function, FunctionData, Program, Type, Value};
 use std::error::Error;
 
-use super::ast::{BlockItem, CompUnit, Stmt};
+use super::ast::CompUnit;
 #[allow(unused_imports)]
 use super::error::{PushKeyError, UnimplementedError};
 use super::stmt;
@@ -13,7 +13,7 @@ use super::symbol::SymbolTable;
 pub struct GenerateContext<'a> {
   pub program: &'a mut Program,
   pub func: Function,
-  pub bb: BasicBlock,
+  pub bb: Option<BasicBlock>,
   pub symbol: SymbolTable,
 
   next_bb_no: Box<dyn Iterator<Item = i32>>,
@@ -27,13 +27,13 @@ impl<'a> GenerateContext<'a> {
       Type::get_i32(),
     ));
     let main_data = program.func_mut(main);
-  
+
     // %entry basic block
     let entry = main_data
       .dfg_mut()
       .new_bb()
       .basic_block(Some("%entry".into()));
-  
+
     main_data
       .layout_mut()
       .bbs_mut()
@@ -43,7 +43,7 @@ impl<'a> GenerateContext<'a> {
     Ok(Self {
       program: program,
       func: main,
-      bb: entry,
+      bb: Some(entry),
       symbol: SymbolTable::new(),
       next_bb_no: Box::new(0..),
     })
@@ -67,16 +67,30 @@ impl<'a> GenerateContext<'a> {
     Ok(bb)
   }
 
-  pub fn insts(&mut self) -> &mut InstList {
-    let bb = self.bb;
+  pub fn insts(&mut self, bb: BasicBlock) -> &mut InstList {
     self.layout().bb_mut(bb).insts_mut()
   }
 
   pub fn add_inst(&mut self, value: Value) -> Result<(), Box<dyn Error>> {
-    self
-      .insts()
-      .push_key_back(value)
-      .map_err(|k| PushKeyError(Box::new(k)))?;
+    if let Some(bb) = self.bb {
+      self
+        .insts(bb)
+        .push_key_back(value)
+        .map_err(|k| {
+          let vd = self.dfg().value(k).clone();
+          PushKeyError(Box::new(vd))
+        })?;
+    }
+    Ok(())
+  }
+
+  pub fn switch_bb(
+    &mut self,
+    final_inst: Value,
+    new_bb: Option<BasicBlock>,
+  ) -> Result<(), Box<dyn Error>> {
+    self.add_inst(final_inst)?;
+    self.bb = new_bb;
     Ok(())
   }
 }
@@ -88,10 +102,6 @@ pub fn generate_program(ast: CompUnit) -> Result<Program, Box<dyn Error>> {
 
   for i in ast.func_def.block.iter() {
     stmt::generate(i, &mut context)?;
-    // Return should be the last instruction
-    if let BlockItem::Stmt(Stmt::Return(_)) = i {
-      break;
-    }
   }
 
   Ok(program)

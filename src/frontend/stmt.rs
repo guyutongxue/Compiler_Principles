@@ -60,38 +60,31 @@ impl GenerateStmt for Stmt {
       Stmt::If(exp, true_stmt, false_stmt) => {
         let cond = expr::generate(exp.as_ref(), context)?;
         let true_bb = context.add_bb()?;
-        let end = context.add_bb()?;
+        let end_bb = context.add_bb()?;
         match false_stmt {
           None => {
-            let br = context.dfg().new_value().branch(cond, true_bb, end);
-            context.add_inst(br)?;
-
-            context.bb = true_bb;
+            let br = context.dfg().new_value().branch(cond, true_bb, end_bb);
+            context.switch_bb(br, Some(true_bb))?;
             true_stmt.generate(context)?;
           }
           Some(false_stmt) => {
             let false_bb = context.add_bb()?;
 
             let br = context.dfg().new_value().branch(cond, true_bb, false_bb);
-            context.add_inst(br)?;
-
-            context.bb = true_bb;
+            context.switch_bb(br, Some(true_bb))?;
             true_stmt.generate(context)?;
-            let jump = context.dfg().new_value().jump(end);
-            context.add_inst(jump)?;
-
-            context.bb = false_bb;
+            let jump = context.dfg().new_value().jump(end_bb);
+            context.switch_bb(jump, Some(false_bb))?;
             false_stmt.generate(context)?;
           }
         }
-        let jump = context.dfg().new_value().jump(end);
-        context.add_inst(jump)?;
-        context.bb = end;
+        let jump = context.dfg().new_value().jump(end_bb);
+        context.switch_bb(jump, Some(end_bb))?;
       }
       Stmt::Return(exp) => {
         let ret_val = expr::generate(exp.as_ref(), context)?;
         let ret = context.dfg().new_value().ret(Some(ret_val));
-        context.add_inst(ret)?;
+        context.switch_bb(ret, None)?;
       }
     }
     Ok(())
