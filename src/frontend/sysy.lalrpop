@@ -37,14 +37,68 @@ BlockItem: BlockItem = {
 }
 
 Stmt: Stmt = {
+  <s: PrimaryStmt> => <>,
+  <s: IfStmt> => <>,
+  <s: IfElseStmt> => <>,
+}
+
+PrimaryStmt: Stmt = {
+  <s: Block> => Stmt::Block(<>.into()),
+  <s: AssignAndExprStmt> => <>,
+  <s: ReturnStmt> => <>,
+}
+
+/// 关于“悬垂 Else”问题的说明:
+///
+/// 按 C++ 标准 (https://eel.is/c++draft/stmt.if#1) 说法：
+/// - In the second form of if statement (the one including else), 
+///   if the first substatement is also an if statement 
+///   then that inner if statement shall contain an else part.
+///
+/// 即：真分支语句如果是 if 语句，则必须以 else 分支结尾。
+/// 下文中，带 -NoShortIf 后缀的语句保证不存在单分支的 if。
+/// 最后，IfElseStmt 的真分支使用 -NoShortIf 后缀的语句。
+
+StmtNoShortIf: Stmt = {
+  <s: PrimaryStmt> => <>,
+  <s: IfElseStmtNoShortIf> => <>,
+}
+
+AssignAndExprStmt: Stmt = {
   <lval: LVal> "=" <exp: Exp> ";" => Stmt::Assign(<>),
   ";" => Stmt::Exp(None),
   <exp: Exp> ";" => Stmt::Exp(Some(<>)),
-  <block: Block> => Stmt::Block(<>.into()),
+}
+
+IfStmt: Stmt = {
+  "if" "(" <exp: Exp> ")" <stmt: Stmt> => Stmt::If(
+    exp,
+    stmt.into(),
+    None,
+  ),
+}
+
+IfElseStmt: Stmt = {
+  "if" "(" <exp: Exp> ")" <stmt: StmtNoShortIf> "else" <else_stmt: Stmt> => Stmt::If(
+    exp, 
+    stmt.into(), 
+    Some(else_stmt.into())
+  ),
+}
+
+IfElseStmtNoShortIf: Stmt = {
+  "if" "(" <exp: Exp> ")" <stmt: StmtNoShortIf> "else" <else_stmt: StmtNoShortIf> => Stmt::If(
+    exp, 
+    stmt.into(), 
+    Some(else_stmt.into())
+  ),
+}
+
+ReturnStmt: Stmt = {
   "return" <exp: Exp> ";" => Stmt::Return(<>),
 }
 
-Exp: Box<LOrExp> = <exp: LOrExp> => exp;
+Exp: Box<Exp> = <exp: LOrExp> => exp;
 
 LOrExp: Box<LOrExp> = {
   <exp: LAndExp> => LOrExp::And(<>).into(),

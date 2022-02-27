@@ -6,12 +6,11 @@ use super::ast::{BlockItem, ConstDecl, Decl, InitVal, LVal, Stmt, VarDecl};
 use super::consteval::Eval;
 use super::error::CompileError;
 use super::expr;
+use super::ir::GenerateContext;
 use super::symbol::Symbol;
 
 #[allow(unused_imports)]
 use super::error::UnimplementedError;
-
-pub use expr::GenerateContext;
 
 pub fn generate(item: &BlockItem, context: &mut GenerateContext) -> Result<(), Box<dyn Error>> {
   match item {
@@ -57,6 +56,37 @@ impl GenerateStmt for Stmt {
           generate(item, context)?;
         }
         context.symbol.pop();
+      }
+      Stmt::If(exp, true_stmt, false_stmt) => {
+        let cond = expr::generate(exp.as_ref(), context)?;
+        let true_bb = context.add_bb()?;
+        let end = context.add_bb()?;
+        match false_stmt {
+          None => {
+            let br = context.dfg().new_value().branch(cond, true_bb, end);
+            context.add_inst(br)?;
+
+            context.bb = true_bb;
+            true_stmt.generate(context)?;
+          }
+          Some(false_stmt) => {
+            let false_bb = context.add_bb()?;
+
+            let br = context.dfg().new_value().branch(cond, true_bb, false_bb);
+            context.add_inst(br)?;
+
+            context.bb = true_bb;
+            true_stmt.generate(context)?;
+            let jump = context.dfg().new_value().jump(end);
+            context.add_inst(jump)?;
+
+            context.bb = false_bb;
+            false_stmt.generate(context)?;
+          }
+        }
+        let jump = context.dfg().new_value().jump(end);
+        context.add_inst(jump)?;
+        context.bb = end;
       }
       Stmt::Return(exp) => {
         let ret_val = expr::generate(exp.as_ref(), context)?;

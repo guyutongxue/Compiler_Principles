@@ -1,50 +1,18 @@
 use koopa::ir::builder::{LocalInstBuilder, ValueBuilder};
-use koopa::ir::dfg::DataFlowGraph;
-use koopa::ir::layout::InstList;
-use koopa::ir::{BasicBlock, BinaryOp, Function, Program, Value};
+use koopa::ir::{BinaryOp, Value};
 use std::error::Error;
-
-use super::consteval::Eval;
-use super::error::CompileError;
-use super::error::PushKeyError;
-
-#[allow(unused_imports)]
-use super::error::UnimplementedError;
 
 use super::ast::{
   AddExp, AddOp, EqExp, EqOp, LAndExp, LOrExp, LVal, MulExp, MulOp, PrimaryExp, RelExp, RelOp,
   UnaryExp, UnaryOp,
 };
-use super::symbol::{Symbol, SymbolTable};
+use super::consteval::Eval;
+use super::error::CompileError;
+use super::ir::GenerateContext;
+use super::symbol::Symbol;
 
-pub struct GenerateContext<'a> {
-  pub program: &'a mut Program,
-  pub func: Function,
-  pub bb: BasicBlock,
-  pub symbol: SymbolTable,
-}
-
-impl<'a> GenerateContext<'a> {
-  pub fn dfg(&mut self) -> &mut DataFlowGraph {
-    self.program.func_mut(self.func).dfg_mut()
-  }
-  pub fn insts(&mut self) -> &mut InstList {
-    self
-      .program
-      .func_mut(self.func)
-      .layout_mut()
-      .bb_mut(self.bb)
-      .insts_mut()
-  }
-
-  pub fn add_inst(&mut self, value: Value) -> Result<(), Box<dyn Error>> {
-    self
-      .insts()
-      .push_key_back(value)
-      .map_err(|k| PushKeyError(Box::new(k)))?;
-    Ok(())
-  }
-}
+#[allow(unused_imports)]
+use super::error::UnimplementedError;
 
 pub fn generate<EvalExp: Eval + GenerateValue>(
   exp: &EvalExp,

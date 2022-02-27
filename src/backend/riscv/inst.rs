@@ -1,7 +1,10 @@
 // https：//pku-minicgithubio/online-doc/#/misc-app-ref/riscv-insts
 
-pub type Label = String;
+use std::fmt;
+
 use super::reg::Reg;
+
+pub type Label = String;
 
 #[allow(dead_code)]
 #[derive(Debug, PartialEq)]
@@ -180,9 +183,9 @@ fn fmt_reg_imm(name: &str, reg: Reg, imm: i32) -> String {
   format!("{} {}, {}", name, reg, imm)
 }
 
-impl ToString for Inst {
-  fn to_string(&self) -> String {
-    match self {
+impl fmt::Display for Inst {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    let inst = match self {
       Inst::Beqz(rs, label) => fmt_reg_label("beqz", *rs, label),
       Inst::Bnez(rs, label) => fmt_reg_label("bnez", *rs, label),
       Inst::J(label) => fmt_label("j", label),
@@ -212,6 +215,7 @@ impl ToString for Inst {
       Inst::Li(rd, imm) => fmt_reg_imm("li", *rd, *imm),
       Inst::La(rd, label) => fmt_reg_label("la", *rd, label),
       Inst::Mv(rd, rs) => fmt_reg2("mv", *rd, *rs),
-    }
+    };
+    write!(f, "{}", inst)
   }
 }

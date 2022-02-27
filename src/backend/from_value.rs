@@ -1,4 +1,4 @@
-use koopa::ir::{BinaryOp, Value, ValueKind};
+use koopa::ir::{BasicBlock, BinaryOp, Value, ValueKind};
 use std::error::Error;
 
 use super::error::*;
@@ -12,14 +12,14 @@ pub fn generate(v: Value, context: &mut GenerateContext) -> Result<(), Box<dyn E
 
 impl<'a> GenerateContext<'a> {
   fn push_inst(&mut self, inst: Inst) {
-    self.insts.push(inst.to_string());
+    self.insts.push(format!("  {}", inst));
   }
 
   fn get_offset(&mut self, value: Value) -> Result<i32, Box<dyn Error>> {
-    if let Some(offset) = self.offsets.get(&value) {
-      Ok(*offset) 
+    if let Some(&offset) = self.offsets.get(&value) {
+      Ok(offset)
     } else {
-      let offset = self.next_offset.next().ok_or(StackOverflowError)?;
+      let offset = self.next_offset.next().unwrap();
       self.offsets.insert(value, offset);
       Ok(offset)
     }
@@ -48,6 +48,14 @@ impl<'a> GenerateContext<'a> {
     let offset = self.get_offset(value)?;
     self.push_inst(Inst::Sw(reg, offset, Reg::Sp));
     Ok(())
+  }
+
+  pub fn get_label(&self, bb: BasicBlock) -> Result<String, Box<dyn Error>> {
+    let label = self
+      .labels
+      .get(&bb)
+      .ok_or_else(|| LabelNotExistError(self.func_data.dfg().bb(bb).name().clone().unwrap()))?;
+    Ok(label.clone())
   }
 }
 
@@ -143,6 +151,22 @@ impl GenerateAsmDetail for Value {
         let src = load.src();
         context.load_value_to_reg(src, &mut reg)?;
         context.save_value_from_reg(self, reg)?;
+      }
+      ValueKind::Branch(branch) => {
+        let cond = branch.cond();
+        let mut rd = Reg::T0;
+        context.load_value_to_reg(cond, &mut rd)?;
+        let true_bb = branch.true_bb();
+        let true_label = context.get_label(true_bb)?;
+        context.push_inst(Inst::Bnez(rd, true_label));
+        let false_bb = branch.false_bb();
+        let false_label = context.get_label(false_bb)?;
+        context.push_inst(Inst::J(false_label));
+      }
+      ValueKind::Jump(jump) => {
+        let bb = jump.target();
+        let label = context.get_label(bb)?;
+        context.push_inst(Inst::J(label));
       }
       x => return Err(UnimplementedError(Box::from(x.clone())).into()),
     }

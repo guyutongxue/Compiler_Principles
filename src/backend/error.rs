@@ -1,6 +1,5 @@
 use std::{error::Error, fmt};
 
-
 #[derive(Debug)]
 pub struct UnimplementedError(pub Box<dyn fmt::Debug>);
 
@@ -13,12 +12,12 @@ impl fmt::Display for UnimplementedError {
 }
 
 #[derive(Debug)]
-pub struct StackOverflowError;
+pub struct LabelNotExistError(pub String);
 
-impl Error for StackOverflowError {}
+impl Error for LabelNotExistError {}
 
-impl fmt::Display for StackOverflowError {
+impl fmt::Display for LabelNotExistError {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-    write!(f, "stack overflow")
+    write!(f, "cannot find corresponding label for bb '{}'", self.0)
   }
 }

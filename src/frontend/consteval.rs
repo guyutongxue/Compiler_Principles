@@ -2,7 +2,7 @@ use super::ast::{
   AddExp, AddOp, EqExp, EqOp, LAndExp, LOrExp, LVal, MulExp, MulOp, PrimaryExp, RelExp, RelOp,
   UnaryExp, UnaryOp,
 };
-use super::expr::GenerateContext;
+use super::ir::GenerateContext;
 use super::symbol::Symbol;
 
 pub trait Eval {
