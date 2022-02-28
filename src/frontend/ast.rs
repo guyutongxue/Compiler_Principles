@@ -1,18 +1,30 @@
+pub type CompUnit = Vec<GlobalDef>;
+
 #[derive(Debug)]
-pub struct CompUnit {
-  pub func_def: FuncDef,
+pub enum GlobalDef {
+  Func(FuncDef),
 }
 
 #[derive(Debug)]
 pub struct FuncDef {
   pub func_type: FuncType,
+  pub param_list: ParamList,
   pub ident: String,
   pub block: Block,
 }
 
+
 #[derive(Debug)]
 pub enum FuncType {
+  Void,
   Int,
+}
+
+pub type ParamList = Vec<Param>;
+
+#[derive(Debug)]
+pub enum Param {
+  Ident(String),
 }
 
 pub type Block = Vec<BlockItem>;
@@ -103,6 +115,7 @@ pub enum MulOp {
 #[derive(Debug)]
 pub enum UnaryExp {
   Primary(PrimaryExp),
+  Call(String, Vec<Box<Exp>>),
   Op(UnaryOp, Box<UnaryExp>),
 }
 

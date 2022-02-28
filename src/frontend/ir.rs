@@ -1,14 +1,17 @@
 use koopa::ir::builder::{BasicBlockBuilder, LocalInstBuilder, ValueBuilder};
 use koopa::ir::dfg::DataFlowGraph;
 use koopa::ir::layout::{InstList, Layout};
-use koopa::ir::{BasicBlock, Function, FunctionData, Program, Type, Value, TypeKind};
+use koopa::ir::{BasicBlock, Function, FunctionData, Program, Type, TypeKind, Value};
 use std::error::Error;
 
-use super::ast::CompUnit;
+use crate::frontend::ast::Param;
+
+use super::ast::{CompUnit, FuncDef, FuncType, GlobalDef};
+use super::error::CompileError;
 #[allow(unused_imports)]
 use super::error::{PushKeyError, UnimplementedError};
 use super::stmt;
-use super::symbol::SymbolTable;
+use super::symbol::{Symbol, SymbolTable};
 
 pub struct GenerateContext<'a> {
   pub program: &'a mut Program,
@@ -23,34 +26,60 @@ pub struct GenerateContext<'a> {
 }
 
 impl<'a> GenerateContext<'a> {
-  pub fn new(program: &'a mut Program, func_name: &str) -> Result<Self, Box<dyn Error>> {
-    let main = program.new_func(FunctionData::with_param_names(
-      format!("@{}", func_name),
-      vec![],
-      Type::get_i32(),
+  pub fn new(program: &'a mut Program, func_ast: &FuncDef) -> Result<Self, Box<dyn Error>> {
+    let func_ir_name = format!("@{}", func_ast.ident);
+    let func_ir_param: Vec<_> = func_ast
+      .param_list
+      .iter()
+      .map(|param| match param {
+        Param::Ident(ident) => (Some(format!("@{}", ident)), Type::get_i32()),
+      })
+      .collect();
+    let func_ir_type = match func_ast.func_type {
+      FuncType::Int => Type::get_i32(),
+      FuncType::Void => Type::get_unit(),
+    };
+
+    let func = program.new_func(FunctionData::with_param_names(
+      func_ir_name,
+      func_ir_param,
+      func_ir_type,
     ));
-    let main_data = program.func_mut(main);
 
-    // %entry basic block
-    let entry = main_data
-      .dfg_mut()
-      .new_bb()
-      .basic_block(Some("%entry".into()));
-
-    main_data
-      .layout_mut()
-      .bbs_mut()
-      .push_key_back(entry)
-      .map_err(|k| PushKeyError(Box::new(k)))?;
-
-    Ok(Self {
+    let mut this = Self {
       program: program,
-      func: main,
-      bb: Some(entry),
+      func,
+      bb: None,
       symbol: SymbolTable::new(),
       next_bb_no: Box::new(0..),
       loop_jump_pt: vec![],
-    })
+    };
+
+    // %entry basic block
+    let entry = this.add_bb()?;
+    this.bb = Some(entry);
+
+    // Store parameters to local variable
+    for (i, param) in func_ast.param_list.iter().enumerate() {
+      let param_name = match param {
+        Param::Ident(ident) => ident.clone(),
+      };
+      let param_type = Type::get_i32();
+      let alloc = this.dfg().new_value().alloc(param_type);
+      let param = this.program.func(this.func).params()[i];
+      let store = this.dfg().new_value().store(param, alloc);
+
+      this.add_inst(alloc)?;
+      this.add_inst(store)?;
+
+      if !this.symbol.insert(&param_name, Symbol::Var(alloc)) {
+        Err(CompileError(format!(
+          "Multiple parameters with a same name {}",
+          &param_name
+        )))?;
+      }
+    }
+    Ok(this)
   }
 
   pub fn dfg(&mut self) -> &mut DataFlowGraph {
@@ -99,22 +128,34 @@ impl<'a> GenerateContext<'a> {
 pub fn generate_program(ast: CompUnit) -> Result<Program, Box<dyn Error>> {
   let mut program = Program::new();
 
-  let mut context = GenerateContext::new(&mut program, &ast.func_def.ident)?;
+  for def in ast {
+    match def {
+      GlobalDef::Func(def) => {
+        let mut context = GenerateContext::new(&mut program, &def)?;
+        if !SymbolTable::insert_global(&def.ident, Symbol::Func(context.func)) {
+          Err(CompileError(format!(
+            "Redefinition of function {}",
+            &def.ident
+          )))?;
+        }
 
-  for i in ast.func_def.block.iter() {
-    stmt::generate(i, &mut context)?;
+        for i in def.block.iter() {
+          stmt::generate(i, &mut context)?;
+        }
+      }
+    }
   }
 
   for (_, fd) in program.funcs_mut().iter_mut() {
-    patch_no_return_ub(fd);
+    add_return_for_empty_bb(fd);
   }
 
   Ok(program)
 }
 
 /// Add a return instruction for each empty bb.
-/// See https://github.com/pku-minic/compiler-dev-test-cases/issues/1
-fn patch_no_return_ub(fd: &mut FunctionData) {
+/// Required for void functions.
+fn add_return_for_empty_bb(fd: &mut FunctionData) {
   let empty_bbs: Vec<BasicBlock> = fd
     .layout()
     .bbs()
@@ -125,7 +166,7 @@ fn patch_no_return_ub(fd: &mut FunctionData) {
 
   for bb in empty_bbs {
     if let TypeKind::Function(_, ret_type) = fd.ty().kind() {
-      let ret = if *ret_type == Type::get_i32() {
+      let ret = if Type::is_i32(ret_type) {
         let retval = fd.dfg_mut().new_value().integer(0);
         fd.dfg_mut().new_value().ret(Some(retval))
       } else {

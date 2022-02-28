@@ -1,62 +1,13 @@
-use koopa::ir::{BasicBlock, BinaryOp, Value, ValueKind};
+use koopa::ir::{BinaryOp, Value, ValueKind};
 use std::error::Error;
 
-use super::error::*;
 use super::from_func::GenerateContext;
 use super::riscv::inst::Inst;
 use super::riscv::reg::Reg;
+use super::{error::*, FUNC_NAMES};
 
 pub fn generate(v: Value, context: &mut GenerateContext) -> Result<(), Box<dyn Error>> {
   v.generate(context)
-}
-
-impl<'a> GenerateContext<'a> {
-  fn push_inst(&mut self, inst: Inst) {
-    self.insts.push(format!("  {}", inst));
-  }
-
-  fn get_offset(&mut self, value: Value) -> Result<i32, Box<dyn Error>> {
-    if let Some(&offset) = self.offsets.get(&value) {
-      Ok(offset)
-    } else {
-      let offset = self.next_offset.next().unwrap();
-      self.offsets.insert(value, offset);
-      Ok(offset)
-    }
-  }
-
-  fn load_value_to_reg(&mut self, value: Value, reg: &mut Reg) -> Result<(), Box<dyn Error>> {
-    if let ValueKind::Integer(integer) = self.func_data.dfg().value(value).kind() {
-      // Alloc a register for storing a integer.
-      let integer = integer.value();
-      if integer != 0 {
-        // For non-zero value, use a temp register, then `li` the immediate into it.
-        self.push_inst(Inst::Li(*reg, integer));
-      } else {
-        // For zero, use `zero` register.
-        *reg = Reg::Zero;
-      }
-    } else {
-      // Load the value from stack.
-      let offset = self.get_offset(value)?;
-      self.push_inst(Inst::Lw(*reg, offset, Reg::Sp));
-    }
-    Ok(())
-  }
-
-  fn save_value_from_reg(&mut self, value: Value, reg: Reg) -> Result<(), Box<dyn Error>> {
-    let offset = self.get_offset(value)?;
-    self.push_inst(Inst::Sw(reg, offset, Reg::Sp));
-    Ok(())
-  }
-
-  pub fn get_label(&self, bb: BasicBlock) -> Result<String, Box<dyn Error>> {
-    let label = self
-      .labels
-      .get(&bb)
-      .ok_or_else(|| LabelNotExistError(self.func_data.dfg().bb(bb).name().clone().unwrap()))?;
-    Ok(label.clone())
-  }
 }
 
 trait GenerateAsmDetail {
@@ -124,17 +75,14 @@ impl GenerateAsmDetail for Value {
         context.save_value_from_reg(self, rd)?;
       }
       ValueKind::Return(ret) => {
-        let retval = ret.value().ok_or("no return value")?;
-        let mut rs = Reg::A0;
-        context.load_value_to_reg(retval, &mut rs)?;
-        if rs != Reg::A0 {
-          context.push_inst(Inst::Mv(Reg::A0, rs));
+        if let Some(retval) = ret.value() {
+          let mut rs = Reg::A0;
+          context.load_value_to_reg(retval, &mut rs)?;
+          if rs != Reg::A0 {
+            context.push_inst(Inst::Mv(Reg::A0, rs));
+          }
         }
-
-        // EPILOGUE
-        context.push_inst(Inst::Addi(Reg::Sp, Reg::Sp, context.frame_size));
-
-        context.push_inst(Inst::Ret);
+        context.generate_epilogue();
       }
       ValueKind::Alloc(_) => {
         context.get_offset(self)?;
@@ -167,6 +115,19 @@ impl GenerateAsmDetail for Value {
         let bb = jump.target();
         let label = context.get_label(bb)?;
         context.push_inst(Inst::J(label));
+      }
+      ValueKind::Call(func) => {
+        let args = func.args();
+        context.set_args(args)?;
+        let callee = FUNC_NAMES
+          .read()?
+          .get(&func.callee())
+          .cloned()
+          .ok_or(LabelNotExistError("global function ??".into()))?;
+        context.push_inst(Inst::Call(callee));
+        if data.ty().is_i32() {
+          context.save_value_from_reg(self, Reg::A0)?;
+        }
       }
       x => return Err(UnimplementedError(Box::from(x.clone())).into()),
     }

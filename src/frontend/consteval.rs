@@ -106,6 +106,7 @@ impl Eval for UnaryExp {
   fn eval(&self, context: &GenerateContext) -> Option<i32> {
     match self {
       UnaryExp::Primary(exp) => exp.eval(context),
+      UnaryExp::Call(_, _) => None,
       UnaryExp::Op(op, exp) => {
         let exp = exp.eval(context)?;
         match op {
@@ -136,6 +137,7 @@ impl Eval for LVal {
         match symbol {
           Symbol::Const(i) => Some(i),
           Symbol::Var(_) => None,
+          Symbol::Func(_) => None,
         }
       }
     }

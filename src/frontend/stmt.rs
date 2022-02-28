@@ -42,6 +42,10 @@ impl GenerateStmt for Stmt {
               let store = context.dfg().new_value().store(exp, alloc);
               context.add_inst(store)?;
             }
+            Symbol::Func(_) => Err(CompileError(format!(
+              "Cannot assign to function: {}",
+              ident
+            )))?,
           }
         }
       },

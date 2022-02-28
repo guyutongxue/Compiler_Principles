@@ -1,14 +1,18 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::RwLock};
 
-use koopa::ir::Value;
+use koopa::ir::{Value, Function};
+use once_cell::sync::Lazy;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Symbol {
   Const(i32),
   Var(Value),
+  Func(Function),
 }
 
 pub struct SymbolTable(Vec<HashMap<String, Symbol>>);
+
+static GLOBAL: Lazy<RwLock<HashMap<String, Symbol>>> = Lazy::new(|| RwLock::default());
 
 impl SymbolTable {
   pub fn new() -> SymbolTable {
@@ -24,13 +28,17 @@ impl SymbolTable {
     current.insert(key.into(), value).is_none()
   }
 
+  pub fn insert_global(key: &str, value: Symbol) -> bool {
+    GLOBAL.write().unwrap().insert(key.into(), value).is_none()
+  }
+
   pub fn get(&self, key: &str) -> Option<Symbol> {
     for i in self.0.iter().rev() {
       if let Some(v) = i.get(key) {
         return Some(v.clone());
       }
     }
-    None
+    GLOBAL.read().ok()?.get(key).cloned()
   }
 
   pub fn push(&mut self) {

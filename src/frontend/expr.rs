@@ -1,5 +1,5 @@
 use koopa::ir::builder::{LocalInstBuilder, ValueBuilder};
-use koopa::ir::{BinaryOp, Type, Value};
+use koopa::ir::{BinaryOp, Type, Value, ValueKind};
 use std::error::Error;
 
 use super::ast::{
@@ -194,6 +194,24 @@ impl GenerateValue for UnaryExp {
   fn generate_value(&self, context: &mut GenerateContext) -> Result<Value, Box<dyn Error>> {
     match self {
       UnaryExp::Primary(exp) => exp.generate_value(context),
+      UnaryExp::Call(func_name, args) => {
+        let func = context
+          .symbol
+          .get(func_name)
+          .ok_or(CompileError(format!("Function {} undefined", func_name)))?;
+
+        if let Symbol::Func(func) = func {
+          let args = args
+            .iter()
+            .map(|arg| generate(arg.as_ref(), context))
+            .collect::<Result<Vec<_>, _>>()?;
+          let result = context.dfg().new_value().call(func, args);
+          context.add_inst(result)?;
+          Ok(result)
+        } else {
+          Err(CompileError(format!("{} is not a function", func_name)))?
+        }
+      }
       UnaryExp::Op(op, exp) => match op {
         UnaryOp::Positive => generate(exp.as_ref(), context),
         UnaryOp::Negative => {
@@ -238,11 +256,19 @@ impl GenerateValue for LVal {
           .ok_or(CompileError(format!("Undefined variable: {}", ident)))?;
         match symbol {
           Symbol::Const(value) => Ok(context.dfg().new_value().integer(value)),
-          Symbol::Var(alloc) => {
-            let load = context.dfg().new_value().load(alloc);
-            context.add_inst(load)?;
-            Ok(load)
-          }
+          Symbol::Var(val) => match context.dfg().value(val).kind() {
+            ValueKind::Alloc(_) => {
+              let load = context.dfg().new_value().load(val);
+              context.add_inst(load)?;
+              Ok(load)
+            }
+            ValueKind::FuncArgRef(_) => Ok(val),
+            _ => Err(CompileError(format!("{} is not a variable", ident)))?,
+          },
+          Symbol::Func(_) => Err(CompileError(format!(
+            "Cannot use function as a value: {}",
+            ident
+          )))?,
         }
       }
     }

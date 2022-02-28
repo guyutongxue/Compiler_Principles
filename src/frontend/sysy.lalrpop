@@ -9,15 +9,43 @@ match {
   _
 }
 
-pub CompUnit: CompUnit = <func_def: FuncDef> => CompUnit { <> };
+pub CompUnit: CompUnit = {
+  <def: GlobalDef> => vec![<>],
+  <comp_unit: CompUnit> <func_def: GlobalDef> => {
+    comp_unit.into_iter().chain(vec![func_def]).collect()
+  } 
+}
+
+GlobalDef: GlobalDef = {
+  <def: FuncDef> => GlobalDef::Func(<>)
+}
 
 FuncDef: FuncDef = {
   <func_type: FuncType> <ident: Ident> "(" ")" <block: Block> => {
+    FuncDef { <>, param_list: vec![] }
+  },
+  <func_type: FuncType> 
+  <ident: Ident> "(" <param_list: ParamList> ")" 
+  <block: Block> => {
     FuncDef { <> }
+  },
+}
+
+FuncType: FuncType = {
+  "void" => FuncType::Void,
+  "int" => FuncType::Int,
+}
+
+ParamList: ParamList = {
+  <param: Param> => vec![<>],
+  <list: ParamList> "," <param: Param> => {
+    list.into_iter().chain(vec![param]).collect()
   }
 }
 
-FuncType: FuncType = "int" => FuncType::Int;
+Param: Param = {
+  <btype: BType> <ident: Ident> => Param::Ident(ident.into()),
+}
 
 Block: Block = {
   "{" "}" => vec![],
@@ -173,7 +201,16 @@ MulOp: MulOp = {
 
 UnaryExp: Box<UnaryExp> = {
   <exp: PrimaryExp> => UnaryExp::Primary(exp).into(),
+  <func: Ident> "(" ")" => UnaryExp::Call(func, vec![]).into(),
+  <func: Ident> "(" <args: ArgList> ")" => UnaryExp::Call(func, args).into(),
   <op: UnaryOp> <exp: UnaryExp> => UnaryExp::Op(op, exp.into()).into(),
+}
+
+ArgList: Vec<Box<Exp>> = {
+  <exp: Exp> => vec![exp],
+  <args: ArgList> "," <exp: Exp> => {
+    args.into_iter().chain(vec![exp]).collect()
+  },
 }
 
 UnaryOp: UnaryOp = {
