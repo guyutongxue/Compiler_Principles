@@ -12,7 +12,8 @@ pub enum Symbol {
 
 pub struct SymbolTable(Vec<HashMap<String, Symbol>>);
 
-static GLOBAL: Lazy<RwLock<HashMap<String, Symbol>>> = Lazy::new(|| RwLock::default());
+/// (符号名, 存在定义)
+static GLOBAL: Lazy<RwLock<HashMap<String, (Symbol, bool)>>> = Lazy::new(|| RwLock::default());
 
 impl SymbolTable {
   pub fn new() -> SymbolTable {
@@ -28,8 +29,19 @@ impl SymbolTable {
     current.insert(key.into(), value).is_none()
   }
 
-  pub fn insert_global(key: &str, value: Symbol) -> bool {
-    GLOBAL.write().unwrap().insert(key.into(), value).is_none()
+  #[must_use]
+  pub fn insert_global_def(key: &str, value: Symbol) -> bool {
+    let exists = GLOBAL.write().unwrap().insert(key.into(), (value, true));
+    if let Some(exists) = exists {
+      if exists.1 {
+        return false;
+      }
+    }
+    true
+  }
+
+  pub fn insert_global_decl(key: &str, value: Symbol) -> bool {
+    GLOBAL.write().unwrap().insert(key.into(), (value, false)).is_none()
   }
 
   pub fn get(&self, key: &str) -> Option<Symbol> {
@@ -38,7 +50,11 @@ impl SymbolTable {
         return Some(v.clone());
       }
     }
-    GLOBAL.read().ok()?.get(key).cloned()
+    None
+  }
+
+  pub fn get_global(key: &str) -> Option<Symbol> {
+    GLOBAL.read().ok()?.get(key).map(|v| v.0.clone())
   }
 
   pub fn push(&mut self) {

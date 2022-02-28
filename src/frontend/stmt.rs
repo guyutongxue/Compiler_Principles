@@ -2,12 +2,12 @@ use koopa::ir::builder::LocalInstBuilder;
 use koopa::ir::Type;
 use std::error::Error;
 
-use super::ast::{BlockItem, ConstDecl, Decl, InitVal, LVal, Stmt, VarDecl};
-use super::consteval::Eval;
+use super::ast::{BlockItem, Decl, InitVal, LVal, Stmt, TypeSpec};
+use super::consteval::consteval;
 use super::error::CompileError;
 use super::expr;
 use super::ir::GenerateContext;
-use super::symbol::Symbol;
+use super::symbol::{Symbol, SymbolTable};
 
 #[allow(unused_imports)]
 use super::error::UnimplementedError;
@@ -31,7 +31,8 @@ impl GenerateStmt for Stmt {
           let symbol = context
             .symbol
             .get(ident)
-            .ok_or(CompileError(format!("Undefined variable: {}", ident)))?;
+            .or_else(|| SymbolTable::get_global(ident))
+            .ok_or(CompileError(format!("Variable {} undefined", ident)))?;
           match symbol {
             Symbol::Const(_) => Err(CompileError(format!(
               "Cannot assign to constant: {}",
@@ -132,47 +133,46 @@ impl GenerateStmt for Stmt {
 impl GenerateStmt for Decl {
   fn generate(&self, context: &mut GenerateContext) -> Result<(), Box<dyn Error>> {
     match self {
-      Decl::Const(constant) => constant.generate(context),
-      Decl::Var(variable) => variable.generate(context),
-    }
-  }
-}
-
-impl GenerateStmt for ConstDecl {
-  fn generate(&self, context: &mut GenerateContext) -> Result<(), Box<dyn Error>> {
-    for i in self.iter() {
-      let name = i.ident.clone();
-      let val = i.init_val.eval(context).ok_or(CompileError(format!(
-        "Constexpr variable {} must be initialized with constant expression",
-        &name
-      )))?;
-      if !context.symbol.insert(&name, Symbol::Const(val)) {
-        return Err(CompileError(format!("Redefinition of variable {}", &name)))?;
-      }
-    }
-    Ok(())
-  }
-}
-
-impl GenerateStmt for VarDecl {
-  fn generate(&self, context: &mut GenerateContext) -> Result<(), Box<dyn Error>> {
-    for i in self.iter() {
-      let name = i.ident.clone();
-      let alloc = context.dfg().new_value().alloc(Type::get_i32());
-      context.add_inst(alloc)?;
-      if let Some(ref init) = i.init_val {
-        match init {
-          InitVal::Simple(exp) => {
-            let init_val = expr::generate(exp.as_ref(), context)?;
-            let store = context.dfg().new_value().store(init_val, alloc);
-            context.add_inst(store)?;
+      Decl::Const(ty, decl) => {
+        if *ty == TypeSpec::Void {
+          Err(CompileError("Cannot declare variable of type void".into()))?;
+        }
+        for i in decl {
+          let name = i.name.clone();
+          let val = consteval(i.init_val.as_ref(), context).ok_or(CompileError(format!(
+            "Constexpr variable {} must be initialized with constant expression",
+            &name
+          )))?;
+          if !context.symbol.insert(&name, Symbol::Const(val)) {
+            return Err(CompileError(format!("Redefinition of variable {}", &name)))?;
           }
         }
+        Ok(())
       }
-      if !context.symbol.insert(&name, Symbol::Var(alloc)) {
-        return Err(CompileError(format!("Redefinition of variable {}", &name)))?;
+      Decl::Var(ty, decl) => {
+        if *ty == TypeSpec::Void {
+          Err(CompileError("Cannot declare variable of type void".into()))?;
+        }
+        for i in decl {
+          let name = i.name.clone();
+          let alloc = context.dfg().new_value().alloc(Type::get_i32());
+          context.add_inst(alloc)?;
+          if let Some(ref init) = i.init_val {
+            match init {
+              InitVal::Simple(exp) => {
+                let init_val = expr::generate(exp.as_ref(), context)?;
+                let store = context.dfg().new_value().store(init_val, alloc);
+                context.add_inst(store)?;
+              }
+            }
+          }
+          if !context.symbol.insert(&name, Symbol::Var(alloc)) {
+            return Err(CompileError(format!("Redefinition of variable {}", &name)))?;
+          }
+        }
+        Ok(())
       }
+      Decl::Func(_) => Err(CompileError("Cannot declare function in block".into()))?,
     }
-    Ok(())
   }
 }

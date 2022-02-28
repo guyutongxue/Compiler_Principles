@@ -10,30 +10,40 @@ match {
 }
 
 pub CompUnit: CompUnit = {
-  <def: GlobalDef> => vec![<>],
-  <comp_unit: CompUnit> <func_def: GlobalDef> => {
-    comp_unit.into_iter().chain(vec![func_def]).collect()
+  <decl: Decl> => vec![<>],
+  <comp_unit: CompUnit> <decl: Decl> => {
+    comp_unit.into_iter().chain(vec![decl]).collect()
   } 
 }
 
-GlobalDef: GlobalDef = {
-  <def: FuncDef> => GlobalDef::Func(<>)
+Decl: Decl = {
+  "const" <ty: TypeSpec> <defs: ConstDefList> ";" => Decl::Const(<>),
+  <ty: TypeSpec> <defs: VarDefList> ";" => Decl::Var(<>),
+  <ty: TypeSpec> <decl: FuncDeclarator> => Decl::Func(FuncDecl {
+    func_type: ty,
+    ident: decl.0,
+    params: decl.1,
+    body: decl.2,
+  }),
 }
 
-FuncDef: FuncDef = {
-  <func_type: FuncType> <ident: Ident> "(" ")" <block: Block> => {
-    FuncDef { <>, param_list: vec![] }
+FuncDeclarator: (String, ParamList, Option<Block>) = {
+  <ident: Ident> "(" ")" <block: FuncBody> => {
+    (ident, vec![], block)
   },
-  <func_type: FuncType> 
-  <ident: Ident> "(" <param_list: ParamList> ")" 
-  <block: Block> => {
-    FuncDef { <> }
+  <ident: Ident> "(" <params: ParamList> ")" <block: FuncBody> => {
+    (ident, params, block)
   },
 }
 
-FuncType: FuncType = {
-  "void" => FuncType::Void,
-  "int" => FuncType::Int,
+FuncBody: Option<Block> = {
+  ";" => None,
+  <block: Block> => Some(<>),
+}
+
+TypeSpec: TypeSpec = {
+  "void" => TypeSpec::Void,
+  "int" => TypeSpec::Int,
 }
 
 ParamList: ParamList = {
@@ -44,7 +54,8 @@ ParamList: ParamList = {
 }
 
 Param: Param = {
-  <btype: BType> <ident: Ident> => Param::Ident(ident.into()),
+  "int" <ident: Ident> => Param::Int(ident.into()),
+  "int" "*" <ident: Ident> => Param::Pointer(ident.into()),
 }
 
 Block: Block = {
@@ -239,17 +250,6 @@ IntConst: i32 = {
   r"0[xX][0-9a-fA-F]+" => i32::from_str_radix(&<>[2..], 16).unwrap(),
 }
 
-Decl: Decl = {
-  <decl: ConstDecl> => Decl::Const(decl),
-  <decl: VarDecl> => Decl::Var(decl)
-}
-
-ConstDecl: ConstDecl = "const" <btype: BType> <defs: ConstDefList> ";" => defs;
-
-VarDecl: VarDecl = <btype: BType> <defs: VarDefList> ";" => defs;
-
-BType: String = "int" => <>.into();
-
 ConstDefList: Vec<ConstDef> = {
   <def: ConstDef> => vec![<>],
   <defs: ConstDefList> "," <def: ConstDef> => {
@@ -258,8 +258,8 @@ ConstDefList: Vec<ConstDef> = {
 }
 
 ConstDef: ConstDef = {
-  <ident: Ident> "=" <init_val: Exp> => ConstDef {
-    ident: ident,
+  <name: Ident> "=" <init_val: Exp> => ConstDef {
+    name: name,
     init_val: init_val.into(),
   },
 }
@@ -272,12 +272,12 @@ VarDefList: Vec<VarDef> = {
 }
 
 VarDef: VarDef = {
-  <ident: Ident> => VarDef { 
+  <name: Ident> => VarDef { 
     <>,
     init_val: None
   },
-  <ident: Ident> "=" <init_val: InitVal> => VarDef {
-    ident: ident,
+  <name: Ident> "=" <init_val: InitVal> => VarDef {
+    name: name,
     init_val: Some(init_val.into()),
   },
 }

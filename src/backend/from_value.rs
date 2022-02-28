@@ -4,7 +4,7 @@ use std::error::Error;
 use super::from_func::GenerateContext;
 use super::riscv::inst::Inst;
 use super::riscv::reg::Reg;
-use super::{error::*, FUNC_NAMES};
+use super::{error::*, FUNC_NAMES, VAR_NAMES};
 
 pub fn generate(v: Value, context: &mut GenerateContext) -> Result<(), Box<dyn Error>> {
   v.generate(context)
@@ -92,12 +92,32 @@ impl GenerateAsmDetail for Value {
         let value = store.value();
         let dest = store.dest();
         context.load_value_to_reg(value, &mut reg)?;
-        context.save_value_from_reg(dest, reg)?;
+        if context.func_data.dfg().values().get(&dest).is_some() {
+          context.save_value_from_reg(dest, reg)?;
+        } else {
+          let var_name = VAR_NAMES
+            .read()?
+            .get(&dest)
+            .cloned()
+            .ok_or(LabelNotExistError("global variable ??".into()))?;
+          context.push_inst(Inst::La(Reg::T3, var_name));
+          context.push_inst(Inst::Sw(reg, 0, Reg::T3));
+        }
       }
       ValueKind::Load(load) => {
         let mut reg = Reg::T0;
         let src = load.src();
-        context.load_value_to_reg(src, &mut reg)?;
+        if context.func_data.dfg().values().get(&src).is_some() {
+          context.load_value_to_reg(src, &mut reg)?;
+        } else {
+          let var_name = VAR_NAMES
+            .read()?
+            .get(&src)
+            .cloned()
+            .ok_or(LabelNotExistError("global variable ??".into()))?;
+          context.push_inst(Inst::La(reg, var_name));
+          context.push_inst(Inst::Lw(reg, 0, reg));
+        }
         context.save_value_from_reg(self, reg)?;
       }
       ValueKind::Branch(branch) => {

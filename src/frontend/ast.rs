@@ -1,21 +1,15 @@
-pub type CompUnit = Vec<GlobalDef>;
+pub type CompUnit = Vec<Decl>;
 
 #[derive(Debug)]
-pub enum GlobalDef {
-  Func(FuncDef),
-}
-
-#[derive(Debug)]
-pub struct FuncDef {
-  pub func_type: FuncType,
-  pub param_list: ParamList,
+pub struct FuncDecl {
+  pub func_type: TypeSpec,
   pub ident: String,
-  pub block: Block,
+  pub params: ParamList,
+  pub body: Option<Block>,
 }
 
-
-#[derive(Debug)]
-pub enum FuncType {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TypeSpec {
   Void,
   Int,
 }
@@ -24,7 +18,8 @@ pub type ParamList = Vec<Param>;
 
 #[derive(Debug)]
 pub enum Param {
-  Ident(String),
+  Int(String),
+  Pointer(String),
 }
 
 pub type Block = Vec<BlockItem>;
@@ -135,22 +130,20 @@ pub enum PrimaryExp {
 
 #[derive(Debug)]
 pub enum Decl {
-  Const(ConstDecl),
-  Var(VarDecl),
+  Const(TypeSpec, Vec<ConstDef>),
+  Var(TypeSpec, Vec<VarDef>),
+  Func(FuncDecl),
 }
-
-pub type ConstDecl = Vec<ConstDef>;
-pub type VarDecl = Vec<VarDef>;
 
 #[derive(Debug)]
 pub struct ConstDef {
-  pub ident: String,
+  pub name: String,
   pub init_val: Box<Exp>,
 }
 
 #[derive(Debug)]
 pub struct VarDef {
-  pub ident: String,
+  pub name: String,
   pub init_val: Option<InitVal>,
 }
 

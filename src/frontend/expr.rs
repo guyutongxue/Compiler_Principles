@@ -6,10 +6,10 @@ use super::ast::{
   AddExp, AddOp, EqExp, EqOp, LAndExp, LOrExp, LVal, MulExp, MulOp, PrimaryExp, RelExp, RelOp,
   UnaryExp, UnaryOp,
 };
-use super::consteval::Eval;
+use super::consteval::{consteval, Eval};
 use super::error::CompileError;
 use super::ir::GenerateContext;
-use super::symbol::Symbol;
+use super::symbol::{Symbol, SymbolTable};
 
 #[allow(unused_imports)]
 use super::error::UnimplementedError;
@@ -19,7 +19,7 @@ pub fn generate<EvalExp: Eval + GenerateValue>(
   context: &mut GenerateContext,
 ) -> Result<Value, Box<dyn Error>> {
   // consteval
-  if let Some(value) = exp.eval(context) {
+  if let Some(value) = consteval(exp, context) {
     let result = context.dfg().new_value().integer(value);
     return Ok(result);
   }
@@ -62,6 +62,9 @@ where
     ShortCircuitingOp::And => BinaryOp::NotEq,
   };
   let lhs_op_zero = context.dfg().new_value().binary(branch_op, lhs, zero);
+  context.add_inst(result)?;
+  context.add_inst(init_result)?;
+  context.add_inst(lhs_op_zero)?;
 
   let true_bb = context.add_bb()?;
   let end_bb = context.add_bb()?;
@@ -69,20 +72,16 @@ where
     .dfg()
     .new_value()
     .branch(lhs_op_zero, true_bb, end_bb);
+  context.switch_bb(branch, Some(true_bb))?;
 
   let rhs = rhs.generate_value(context)?;
   let rhs_neq_zero = context.dfg().new_value().binary(BinaryOp::NotEq, rhs, zero);
   let rhs_store = context.dfg().new_value().store(rhs, result);
+  context.add_inst(rhs_neq_zero)?;
+  context.add_inst(rhs_store)?;
 
   let jump = context.dfg().new_value().jump(end_bb);
   let load = context.dfg().new_value().load(result);
-
-  context.add_inst(result)?;
-  context.add_inst(init_result)?;
-  context.add_inst(lhs_op_zero)?;
-  context.switch_bb(branch, Some(true_bb))?;
-  context.add_inst(rhs_neq_zero)?;
-  context.add_inst(rhs_store)?;
   context.switch_bb(jump, Some(end_bb))?;
   context.add_inst(load)?;
 
@@ -195,9 +194,7 @@ impl GenerateValue for UnaryExp {
     match self {
       UnaryExp::Primary(exp) => exp.generate_value(context),
       UnaryExp::Call(func_name, args) => {
-        let func = context
-          .symbol
-          .get(func_name)
+        let func = SymbolTable::get_global(func_name)
           .ok_or(CompileError(format!("Function {} undefined", func_name)))?;
 
         if let Symbol::Func(func) = func {
@@ -249,28 +246,49 @@ impl GenerateValue for PrimaryExp {
 impl GenerateValue for LVal {
   fn generate_value(&self, context: &mut GenerateContext) -> Result<Value, Box<dyn Error>> {
     match self {
-      LVal::Ident(ident) => {
-        let symbol = context
-          .symbol
-          .get(ident)
-          .ok_or(CompileError(format!("Undefined variable: {}", ident)))?;
+      LVal::Ident(name) => {
+        let symbol = context.symbol.get(name);
+
         match symbol {
-          Symbol::Const(value) => Ok(context.dfg().new_value().integer(value)),
-          Symbol::Var(val) => match context.dfg().value(val).kind() {
-            ValueKind::Alloc(_) => {
-              let load = context.dfg().new_value().load(val);
-              context.add_inst(load)?;
-              Ok(load)
-            }
-            ValueKind::FuncArgRef(_) => Ok(val),
-            _ => Err(CompileError(format!("{} is not a variable", ident)))?,
+          None => global_var_generate_value(name, context),
+          Some(symbol) => match symbol {
+            Symbol::Const(value) => Ok(context.dfg().new_value().integer(value)),
+            Symbol::Var(val) => match context.dfg().value(val).kind() {
+              ValueKind::Alloc(_) => {
+                let load = context.dfg().new_value().load(val);
+                context.add_inst(load)?;
+                Ok(load)
+              }
+              ValueKind::FuncArgRef(_) => Ok(val),
+              _ => Err(CompileError(format!("{} is not a variable", name)))?,
+            },
+            Symbol::Func(_) => Err(CompileError(format!(
+              "Cannot use function as a value: {}",
+              name
+            )))?,
           },
-          Symbol::Func(_) => Err(CompileError(format!(
-            "Cannot use function as a value: {}",
-            ident
-          )))?,
         }
       }
     }
+  }
+}
+
+fn global_var_generate_value(
+  name: &str,
+  context: &mut GenerateContext,
+) -> Result<Value, Box<dyn Error>> {
+  let symbol =
+    SymbolTable::get_global(name).ok_or(CompileError(format!("Variable {} undefined", name)))?;
+  match symbol {
+    Symbol::Const(value) => Ok(context.dfg().new_value().integer(value)),
+    Symbol::Var(val) => {
+      let load = context.dfg().new_value().load(val);
+      context.add_inst(load)?;
+      Ok(load)
+    }
+    Symbol::Func(_) => Err(CompileError(format!(
+      "Cannot use function as a value: {}",
+      name
+    )))?,
   }
 }

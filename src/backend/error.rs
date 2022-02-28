@@ -18,6 +18,6 @@ impl Error for LabelNotExistError {}
 
 impl fmt::Display for LabelNotExistError {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-    write!(f, "cannot find corresponding label for bb '{}'", self.0)
+    write!(f, "cannot find corresponding label for '{}'", self.0)
   }
 }

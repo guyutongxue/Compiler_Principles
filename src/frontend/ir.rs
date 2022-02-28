@@ -1,12 +1,14 @@
-use koopa::ir::builder::{BasicBlockBuilder, LocalInstBuilder, ValueBuilder};
+use koopa::ir::builder::{BasicBlockBuilder, GlobalInstBuilder, LocalInstBuilder, ValueBuilder};
 use koopa::ir::dfg::DataFlowGraph;
 use koopa::ir::layout::{InstList, Layout};
-use koopa::ir::{BasicBlock, Function, FunctionData, Program, Type, TypeKind, Value};
+use koopa::ir::{BasicBlock, Function, FunctionData, Program, Type, TypeKind, Value, ValueKind};
+use std::borrow::BorrowMut;
 use std::error::Error;
 
 use crate::frontend::ast::Param;
 
-use super::ast::{CompUnit, FuncDef, FuncType, GlobalDef};
+use super::ast::{CompUnit, Decl, FuncDecl, InitVal, TypeSpec};
+use super::consteval::Eval;
 use super::error::CompileError;
 #[allow(unused_imports)]
 use super::error::{PushKeyError, UnimplementedError};
@@ -26,18 +28,22 @@ pub struct GenerateContext<'a> {
 }
 
 impl<'a> GenerateContext<'a> {
-  pub fn new(program: &'a mut Program, func_ast: &FuncDef) -> Result<Self, Box<dyn Error>> {
+  pub fn new(program: &'a mut Program, func_ast: &FuncDecl) -> Result<Self, Box<dyn Error>> {
     let func_ir_name = format!("@{}", func_ast.ident);
     let func_ir_param: Vec<_> = func_ast
-      .param_list
+      .params
       .iter()
       .map(|param| match param {
-        Param::Ident(ident) => (Some(format!("@{}", ident)), Type::get_i32()),
+        Param::Int(ident) => (Some(format!("@{}", ident)), Type::get_i32()),
+        Param::Pointer(ident) => (
+          Some(format!("@{}", ident)),
+          Type::get_pointer(Type::get_i32()),
+        ),
       })
       .collect();
     let func_ir_type = match func_ast.func_type {
-      FuncType::Int => Type::get_i32(),
-      FuncType::Void => Type::get_unit(),
+      TypeSpec::Int => Type::get_i32(),
+      TypeSpec::Void => Type::get_unit(),
     };
 
     let func = program.new_func(FunctionData::with_param_names(
@@ -55,28 +61,31 @@ impl<'a> GenerateContext<'a> {
       loop_jump_pt: vec![],
     };
 
-    // %entry basic block
-    let entry = this.add_bb()?;
-    this.bb = Some(entry);
+    if func_ast.body.is_some() {
+      // %entry basic block
+      let entry = this.add_bb()?;
+      this.bb = Some(entry);
 
-    // Store parameters to local variable
-    for (i, param) in func_ast.param_list.iter().enumerate() {
-      let param_name = match param {
-        Param::Ident(ident) => ident.clone(),
-      };
-      let param_type = Type::get_i32();
-      let alloc = this.dfg().new_value().alloc(param_type);
-      let param = this.program.func(this.func).params()[i];
-      let store = this.dfg().new_value().store(param, alloc);
+      // Store parameters to local variable
+      for (i, param) in func_ast.params.iter().enumerate() {
+        let param_name = match param {
+          Param::Int(ident) => ident.clone(),
+          Param::Pointer(ident) => ident.clone(),
+        };
+        let param_type = Type::get_i32();
+        let alloc = this.dfg().new_value().alloc(param_type);
+        let param = this.program.func(this.func).params()[i];
+        let store = this.dfg().new_value().store(param, alloc);
 
-      this.add_inst(alloc)?;
-      this.add_inst(store)?;
+        this.add_inst(alloc)?;
+        this.add_inst(store)?;
 
-      if !this.symbol.insert(&param_name, Symbol::Var(alloc)) {
-        Err(CompileError(format!(
-          "Multiple parameters with a same name {}",
-          &param_name
-        )))?;
+        if !this.symbol.insert(&param_name, Symbol::Var(alloc)) {
+          Err(CompileError(format!(
+            "Multiple parameters with a same name {}",
+            &param_name
+          )))?;
+        }
       }
     }
     Ok(this)
@@ -128,43 +137,98 @@ impl<'a> GenerateContext<'a> {
 pub fn generate_program(ast: CompUnit) -> Result<Program, Box<dyn Error>> {
   let mut program = Program::new();
 
-  for def in ast {
-    match def {
-      GlobalDef::Func(def) => {
-        let mut context = GenerateContext::new(&mut program, &def)?;
-        if !SymbolTable::insert_global(&def.ident, Symbol::Func(context.func)) {
-          Err(CompileError(format!(
-            "Redefinition of function {}",
-            &def.ident
-          )))?;
-        }
+  for decl in ast {
+    match decl {
+      Decl::Func(decl) => {
+        let name = &decl.ident;
+        let mut context = GenerateContext::new(&mut program, &decl)?;
 
-        for i in def.block.iter() {
-          stmt::generate(i, &mut context)?;
+        if let Some(block) = &decl.body {
+          // Function definition
+          if !SymbolTable::insert_global_def(name, Symbol::Func(context.func)) {
+            Err(CompileError(format!(
+              "Redefinition of function {}",
+              &decl.ident
+            )))?;
+          }
+          for i in block.iter() {
+            stmt::generate(i, &mut context)?;
+          }
+        } else {
+          // Function declaration
+          SymbolTable::insert_global_decl(name, Symbol::Func(context.func));
+        }
+      }
+      Decl::Const(ty, decl) => {
+        if ty == TypeSpec::Void {
+          Err(CompileError("Cannot declare variable of type void".into()))?;
+        }
+        for i in decl {
+          let name = i.name.clone();
+          let val = i.init_val.eval(None).ok_or(CompileError(format!(
+            "Global variable {} must be initialized with constant expression",
+            &name
+          )))?;
+          if !SymbolTable::insert_global_def(&name, Symbol::Const(val)) {
+            Err(CompileError(format!("Redefinition of variable {}", &name)))?;
+          }
+        }
+      }
+      Decl::Var(ty, decl) => {
+        if ty == TypeSpec::Void {
+          Err(CompileError("Cannot declare variable of type void".into()))?;
+        }
+        for i in decl {
+          let name = i.name.clone();
+          let value = match i.init_val {
+            Some(init) => match init {
+              InitVal::Simple(exp) => {
+                let init_val = exp.eval(None).ok_or(CompileError(format!(
+                  "Global variable {} must be initialized with constant expression",
+                  &name
+                )))?;
+                program.new_value().integer(init_val)
+              }
+            },
+            None => program.new_value().zero_init(Type::get_i32()),
+          };
+          let alloc = program.new_value().global_alloc(value);
+          program
+            .borrow_mut()
+            .set_value_name(alloc, Some(format!("%{}", name)));
+          if !SymbolTable::insert_global_def(&name, Symbol::Var(alloc)) {
+            Err(CompileError(format!("Redefinition of variable {}", &name)))?;
+          }
         }
       }
     }
   }
 
   for (_, fd) in program.funcs_mut().iter_mut() {
-    add_return_for_empty_bb(fd);
+    add_extra_ret(fd);
   }
 
   Ok(program)
 }
 
-/// Add a return instruction for each empty bb.
-/// Required for void functions.
-fn add_return_for_empty_bb(fd: &mut FunctionData) {
-  let empty_bbs: Vec<BasicBlock> = fd
-    .layout()
-    .bbs()
-    .iter()
-    .filter(|(_, bbn)| bbn.insts().len() == 0)
-    .map(|(bb, _)| bb.clone())
-    .collect();
-
-  for bb in empty_bbs {
+/// Add `ret` value for bbs not ends with `ret`
+fn add_extra_ret(fd: &mut FunctionData) {
+  let mut need_ret_bbs = vec![];
+  for (bb, bbn) in fd.layout().bbs() {
+    if let Some(inst) = bbn.insts().back_key() {
+      let kind = fd.dfg().value(*inst).kind();
+      if matches!(kind, ValueKind::Return(_))
+        || matches!(kind, ValueKind::Jump(_))
+        || matches!(kind, ValueKind::Branch(_))
+      {
+        continue;
+      }
+      need_ret_bbs.push(*bb);
+    } else {
+      need_ret_bbs.push(*bb);
+    }
+  }
+  for bb in need_ret_bbs {
     if let TypeKind::Function(_, ret_type) = fd.ty().kind() {
       let ret = if Type::is_i32(ret_type) {
         let retval = fd.dfg_mut().new_value().integer(0);
