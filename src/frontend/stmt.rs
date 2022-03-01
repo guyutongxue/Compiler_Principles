@@ -1,18 +1,18 @@
 use koopa::ir::builder::LocalInstBuilder;
 use koopa::ir::Type;
-use std::error::Error;
 
-use super::ast::{BlockItem, Decl, InitVal, LVal, Stmt, TypeSpec};
-use super::consteval::consteval;
+use super::ast::{BlockItem, Decl, Initializer, LVal, Stmt, TypeSpec};
+use super::consteval::{consteval, EvalError};
 use super::error::CompileError;
-use super::expr;
 use super::ir::GenerateContext;
 use super::symbol::{Symbol, SymbolTable};
+use super::{expr, ty};
+use crate::Result;
 
 #[allow(unused_imports)]
 use super::error::UnimplementedError;
 
-pub fn generate(item: &BlockItem, context: &mut GenerateContext) -> Result<(), Box<dyn Error>> {
+pub fn generate(item: &BlockItem, context: &mut GenerateContext) -> Result<()> {
   match item {
     BlockItem::Stmt(stmt) => stmt.generate(context),
     BlockItem::Decl(decl) => decl.generate(context),
@@ -20,11 +20,11 @@ pub fn generate(item: &BlockItem, context: &mut GenerateContext) -> Result<(), B
 }
 
 trait GenerateStmt {
-  fn generate(&self, context: &mut GenerateContext) -> Result<(), Box<dyn Error>>;
+  fn generate(&self, context: &mut GenerateContext) -> Result<()>;
 }
 
 impl GenerateStmt for Stmt {
-  fn generate(&self, context: &mut GenerateContext) -> Result<(), Box<dyn Error>> {
+  fn generate(&self, context: &mut GenerateContext) -> Result<()> {
     match self {
       Stmt::Assign(lval, exp) => match lval {
         LVal::Ident(ident) => {
@@ -32,21 +32,15 @@ impl GenerateStmt for Stmt {
             .symbol
             .get(ident)
             .or_else(|| SymbolTable::get_global(ident))
-            .ok_or(CompileError(format!("Variable {} undefined", ident)))?;
+            .ok_or(CompileError::UndeclaredSymbol(ident.clone()))?;
           match symbol {
-            Symbol::Const(_) => Err(CompileError(format!(
-              "Cannot assign to constant: {}",
-              ident
-            )))?,
+            Symbol::Const(_) => Err(CompileError::CanNotAssign(ident.clone(), "常量"))?,
             Symbol::Var(alloc) => {
               let exp = expr::generate(exp.as_ref(), context)?;
               let store = context.dfg().new_value().store(exp, alloc);
               context.add_inst(store)?;
             }
-            Symbol::Func(_) => Err(CompileError(format!(
-              "Cannot assign to function: {}",
-              ident
-            )))?,
+            Symbol::Func(_) => Err(CompileError::CanNotAssign(ident.clone(), "函数"))?,
           }
         }
       },
@@ -106,7 +100,7 @@ impl GenerateStmt for Stmt {
       }
       Stmt::Break => {
         if context.loop_jump_pt.len() == 0 {
-          Err(CompileError("Cannot break outside of loop".into()))?;
+          Err(CompileError::IllegalBreak)?;
         }
         let (end_bb, _) = context.loop_jump_pt.last().unwrap().clone();
         let jump = context.dfg().new_value().jump(end_bb);
@@ -114,7 +108,7 @@ impl GenerateStmt for Stmt {
       }
       Stmt::Continue => {
         if context.loop_jump_pt.len() == 0 {
-          Err(CompileError("Cannot continue outside of loop".into()))?;
+          Err(CompileError::IllegalContinue)?;
         }
         let (_, entry_bb) = context.loop_jump_pt.last().unwrap().clone();
         let jump = context.dfg().new_value().jump(entry_bb);
@@ -131,48 +125,73 @@ impl GenerateStmt for Stmt {
 }
 
 impl GenerateStmt for Decl {
-  fn generate(&self, context: &mut GenerateContext) -> Result<(), Box<dyn Error>> {
+  fn generate(&self, context: &mut GenerateContext) -> Result<()> {
     match self {
-      Decl::Const(ty, decl) => {
-        if *ty == TypeSpec::Void {
-          Err(CompileError("Cannot declare variable of type void".into()))?;
+      // Decl::Const(ty, decl) => {
+      //   if *ty == TypeSpec::Void {
+      //     Err(CompileError("Cannot declare variable of type void".into()))?;
+      //   }
+      //   for i in decl {
+      //     let name = i.name.clone();
+      //     let val = consteval(i.init_val.as_ref(), context).ok_or(CompileError(format!(
+      //       "Constexpr variable {} must be initialized with constant expression",
+      //       &name
+      //     )))?;
+      //     if !context.symbol.insert(&name, Symbol::Const(val)) {
+      //       return Err(CompileError(format!("Redefinition of variable {}", &name)))?;
+      //     }
+      //   }
+      //   Ok(())
+      // }
+      Decl::Var(declaration) => {
+        if declaration.ty == TypeSpec::Void {
+          Err(CompileError::IllegalVoid)?;
         }
-        for i in decl {
-          let name = i.name.clone();
-          let val = consteval(i.init_val.as_ref(), context).ok_or(CompileError(format!(
-            "Constexpr variable {} must be initialized with constant expression",
-            &name
-          )))?;
-          if !context.symbol.insert(&name, Symbol::Const(val)) {
-            return Err(CompileError(format!("Redefinition of variable {}", &name)))?;
-          }
-        }
-        Ok(())
-      }
-      Decl::Var(ty, decl) => {
-        if *ty == TypeSpec::Void {
-          Err(CompileError("Cannot declare variable of type void".into()))?;
-        }
-        for i in decl {
-          let name = i.name.clone();
-          let alloc = context.dfg().new_value().alloc(Type::get_i32());
-          context.add_inst(alloc)?;
-          if let Some(ref init) = i.init_val {
-            match init {
-              InitVal::Simple(exp) => {
-                let init_val = expr::generate(exp.as_ref(), context)?;
-                let store = context.dfg().new_value().store(init_val, alloc);
-                context.add_inst(store)?;
+        for (decl, init) in &declaration.list {
+          let (ty, name) = ty::parse(decl.as_ref())?;
+          if declaration.is_const {
+            let init = init
+              .as_ref()
+              .ok_or(CompileError::InitializerRequired(name.into()))?;
+            let value = match init {
+              Initializer::Simple(init) => {
+                consteval(init.as_ref(), context).map_err(|e| match e {
+                  EvalError::NotConstexpr => CompileError::ConstexprRequired("常量初始化器"),
+                  EvalError::CompileError(e) => e,
+                })?
+              }
+              Initializer::Aggregate(_) => {
+                Err("Not impl: local const decl aggregate initializer".to_string())?
+              }
+            };
+            if !context.symbol.insert(&name, Symbol::Const(value)) {
+              return Err(CompileError::Redefinition(name.into()))?;
+            }
+          } else {
+            let alloc = context.dfg().new_value().alloc(Type::get_i32());
+            context.add_inst(alloc)?;
+            if let Some(ref init) = init {
+              match init {
+                Initializer::Simple(exp) => {
+                  let init_val = expr::generate(exp.as_ref(), context)?;
+                  let store = context.dfg().new_value().store(init_val, alloc);
+                  context.add_inst(store)?;
+                }
+                Initializer::Aggregate(_) => {
+                  Err("Not impl: local decl aggregate initializer".to_string())?
+                }
               }
             }
-          }
-          if !context.symbol.insert(&name, Symbol::Var(alloc)) {
-            return Err(CompileError(format!("Redefinition of variable {}", &name)))?;
+            if !context.symbol.insert(&name, Symbol::Var(alloc)) {
+              return Err(CompileError::Redefinition(name.into()))?;
+            }
           }
         }
         Ok(())
       }
-      Decl::Func(_) => Err(CompileError("Cannot declare function in block".into()))?,
+      Decl::Func(_) => Err(CompileError::Other(
+        "Cannot declare function in block".into(),
+      ))?,
     }
   }
 }

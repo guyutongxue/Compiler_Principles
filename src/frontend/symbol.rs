@@ -1,11 +1,13 @@
 use std::{collections::HashMap, sync::RwLock};
 
-use koopa::ir::{Value, Function};
+use koopa::ir::{Function, Value};
 use once_cell::sync::Lazy;
 
-#[derive(Debug, Clone, Copy)]
+use super::consteval::ConstValue;
+
+#[derive(Debug, Clone)]
 pub enum Symbol {
-  Const(i32),
+  Const(ConstValue),
   Var(Value),
   Func(Function),
 }
@@ -41,7 +43,11 @@ impl SymbolTable {
   }
 
   pub fn insert_global_decl(key: &str, value: Symbol) -> bool {
-    GLOBAL.write().unwrap().insert(key.into(), (value, false)).is_none()
+    GLOBAL
+      .write()
+      .unwrap()
+      .insert(key.into(), (value, false))
+      .is_none()
   }
 
   pub fn get(&self, key: &str) -> Option<Symbol> {
@@ -54,7 +60,7 @@ impl SymbolTable {
   }
 
   pub fn get_global(key: &str) -> Option<Symbol> {
-    GLOBAL.read().ok()?.get(key).map(|v| v.0.clone())
+    GLOBAL.read().ok()?.get(key).cloned().map(|v| v.0)
   }
 
   pub fn push(&mut self) {

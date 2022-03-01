@@ -5,17 +5,18 @@ use super::from_func::GenerateContext;
 use super::riscv::inst::Inst;
 use super::riscv::reg::Reg;
 use super::{error::*, FUNC_NAMES, VAR_NAMES};
+use crate::Result;
 
-pub fn generate(v: Value, context: &mut GenerateContext) -> Result<(), Box<dyn Error>> {
+pub fn generate(v: Value, context: &mut GenerateContext) -> Result<()> {
   v.generate(context)
 }
 
 trait GenerateAsmDetail {
-  fn generate(self, context: &mut GenerateContext) -> Result<(), Box<dyn Error>>;
+  fn generate(self, context: &mut GenerateContext) -> Result<()>;
 }
 
 impl GenerateAsmDetail for Value {
-  fn generate(self, context: &mut GenerateContext) -> Result<(), Box<dyn Error>> {
+  fn generate(self, context: &mut GenerateContext) -> Result<()> {
     let data = context.func_data.dfg().value(self);
     match data.kind() {
       ValueKind::Binary(binary) => {

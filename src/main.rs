@@ -9,7 +9,9 @@ mod argparse;
 mod backend;
 mod frontend;
 
-fn compile() -> Result<(), Box<dyn Error>> {
+type Result<T> = std::result::Result<T, Box<dyn Error>>;
+
+fn compile() -> Result<()> {
   let ParsedArgs {
     mode,
     input,

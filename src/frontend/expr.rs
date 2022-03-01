@@ -1,15 +1,15 @@
 use koopa::ir::builder::{LocalInstBuilder, ValueBuilder};
 use koopa::ir::{BinaryOp, Type, Value, ValueKind};
-use std::error::Error;
 
 use super::ast::{
   AddExp, AddOp, EqExp, EqOp, LAndExp, LOrExp, LVal, MulExp, MulOp, PrimaryExp, RelExp, RelOp,
   UnaryExp, UnaryOp,
 };
-use super::consteval::{consteval, Eval};
+use super::consteval::{consteval, Eval, EvalError};
 use super::error::CompileError;
 use super::ir::GenerateContext;
 use super::symbol::{Symbol, SymbolTable};
+use crate::Result;
 
 #[allow(unused_imports)]
 use super::error::UnimplementedError;
@@ -17,18 +17,25 @@ use super::error::UnimplementedError;
 pub fn generate<EvalExp: Eval + GenerateValue>(
   exp: &EvalExp,
   context: &mut GenerateContext,
-) -> Result<Value, Box<dyn Error>> {
-  // consteval
-  if let Some(value) = consteval(exp, context) {
-    let result = context.dfg().new_value().integer(value);
-    return Ok(result);
+) -> Result<Value> {
+  let eval_result = consteval(exp, context);
+  match eval_result {
+    Ok(const_value) => {
+      // TODO!
+      let result = context.dfg().new_value().integer(const_value.as_int()?);
+      Ok(result)
+    }
+    Err(EvalError::NotConstexpr) => {
+      return exp.generate_value(context);
+    }
+    Err(EvalError::CompileError(error)) => {
+      return Err(error)?;
+    }
   }
-  // runtime
-  exp.generate_value(context)
 }
 
 pub trait GenerateValue {
-  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value, Box<dyn Error>>;
+  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value>;
 }
 
 enum ShortCircuitingOp {
@@ -41,7 +48,7 @@ fn generate_with_short_circuiting<EvalExp1, EvalExp2>(
   lhs: &EvalExp1,
   op: ShortCircuitingOp,
   rhs: &EvalExp2,
-) -> Result<Value, Box<dyn Error>>
+) -> Result<Value>
 where
   EvalExp1: GenerateValue,
   EvalExp2: GenerateValue,
@@ -89,7 +96,7 @@ where
 }
 
 impl GenerateValue for LOrExp {
-  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value, Box<dyn Error>> {
+  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value> {
     match self {
       LOrExp::And(exp) => generate(exp.as_ref(), context),
       LOrExp::Or(lhs, rhs) => {
@@ -100,7 +107,7 @@ impl GenerateValue for LOrExp {
 }
 
 impl GenerateValue for LAndExp {
-  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value, Box<dyn Error>> {
+  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value> {
     match self {
       LAndExp::Eq(exp) => generate(exp.as_ref(), context),
       LAndExp::And(lhs, rhs) => {
@@ -111,7 +118,7 @@ impl GenerateValue for LAndExp {
 }
 
 impl GenerateValue for EqExp {
-  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value, Box<dyn Error>> {
+  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value> {
     match self {
       EqExp::Rel(exp) => generate(exp.as_ref(), context),
       EqExp::Eq(lhs, op, rhs) => {
@@ -130,7 +137,7 @@ impl GenerateValue for EqExp {
 }
 
 impl GenerateValue for RelExp {
-  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value, Box<dyn Error>> {
+  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value> {
     match self {
       RelExp::Add(exp) => generate(exp.as_ref(), context),
       RelExp::Rel(lhs, op, rhs) => {
@@ -151,7 +158,7 @@ impl GenerateValue for RelExp {
 }
 
 impl GenerateValue for AddExp {
-  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value, Box<dyn Error>> {
+  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value> {
     match self {
       AddExp::Mul(exp) => generate(exp.as_ref(), context),
       AddExp::Add(lhs, op, rhs) => {
@@ -170,7 +177,7 @@ impl GenerateValue for AddExp {
 }
 
 impl GenerateValue for MulExp {
-  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value, Box<dyn Error>> {
+  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value> {
     match self {
       MulExp::Unary(exp) => generate(exp.as_ref(), context),
       MulExp::Mul(lhs, op, rhs) => {
@@ -190,23 +197,23 @@ impl GenerateValue for MulExp {
 }
 
 impl GenerateValue for UnaryExp {
-  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value, Box<dyn Error>> {
+  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value> {
     match self {
       UnaryExp::Primary(exp) => exp.generate_value(context),
       UnaryExp::Call(func_name, args) => {
         let func = SymbolTable::get_global(func_name)
-          .ok_or(CompileError(format!("Function {} undefined", func_name)))?;
+          .ok_or(CompileError::UndeclaredSymbol(func_name.clone()))?;
 
         if let Symbol::Func(func) = func {
           let args = args
             .iter()
             .map(|arg| generate(arg.as_ref(), context))
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>>>()?;
           let result = context.dfg().new_value().call(func, args);
           context.add_inst(result)?;
           Ok(result)
         } else {
-          Err(CompileError(format!("{} is not a function", func_name)))?
+          Err(CompileError::TypeMismatch("函数", func_name.clone(), "变量/常量"))?
         }
       }
       UnaryExp::Op(op, exp) => match op {
@@ -231,7 +238,7 @@ impl GenerateValue for UnaryExp {
 }
 
 impl GenerateValue for PrimaryExp {
-  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value, Box<dyn Error>> {
+  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value> {
     match self {
       PrimaryExp::Paren(exp) => generate(exp.as_ref(), context),
       PrimaryExp::Num(num) => {
@@ -244,7 +251,7 @@ impl GenerateValue for PrimaryExp {
 }
 
 impl GenerateValue for LVal {
-  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value, Box<dyn Error>> {
+  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value> {
     match self {
       LVal::Ident(name) => {
         let symbol = context.symbol.get(name);
@@ -252,20 +259,21 @@ impl GenerateValue for LVal {
         match symbol {
           None => global_var_generate_value(name, context),
           Some(symbol) => match symbol {
-            Symbol::Const(value) => Ok(context.dfg().new_value().integer(value)),
-            Symbol::Var(val) => match context.dfg().value(val).kind() {
-              ValueKind::Alloc(_) => {
-                let load = context.dfg().new_value().load(val);
-                context.add_inst(load)?;
-                Ok(load)
+            Symbol::Const(value) => {
+              Ok(context.dfg().new_value().integer(value.as_int()?))
+            }
+            Symbol::Var(val) => {
+              match context.dfg().value(val).kind() {
+                ValueKind::Alloc(_) => {
+                  let load = context.dfg().new_value().load(val);
+                  context.add_inst(load)?;
+                  Ok(load)
+                }
+                ValueKind::FuncArgRef(_) => Ok(val),
+                _ => Err(CompileError::TypeMismatch("变量/常量", name.clone(), "其它"))?,
               }
-              ValueKind::FuncArgRef(_) => Ok(val),
-              _ => Err(CompileError(format!("{} is not a variable", name)))?,
-            },
-            Symbol::Func(_) => Err(CompileError(format!(
-              "Cannot use function as a value: {}",
-              name
-            )))?,
+            }
+            Symbol::Func(_) => Err(CompileError::TypeMismatch("变量", name.clone(), "函数"))?,
           },
         }
       }
@@ -273,22 +281,15 @@ impl GenerateValue for LVal {
   }
 }
 
-fn global_var_generate_value(
-  name: &str,
-  context: &mut GenerateContext,
-) -> Result<Value, Box<dyn Error>> {
-  let symbol =
-    SymbolTable::get_global(name).ok_or(CompileError(format!("Variable {} undefined", name)))?;
+fn global_var_generate_value(name: &str, context: &mut GenerateContext) -> Result<Value> {
+  let symbol = SymbolTable::get_global(name).ok_or(CompileError::UndeclaredSymbol(name.into()))?;
   match symbol {
-    Symbol::Const(value) => Ok(context.dfg().new_value().integer(value)),
+    Symbol::Const(value) => Ok(context.dfg().new_value().integer(value.as_int()?)),
     Symbol::Var(val) => {
       let load = context.dfg().new_value().load(val);
       context.add_inst(load)?;
       Ok(load)
     }
-    Symbol::Func(_) => Err(CompileError(format!(
-      "Cannot use function as a value: {}",
-      name
-    )))?,
+    Symbol::Func(_) => Err(CompileError::TypeMismatch("变量", name.into(), "函数"))?,
   }
 }

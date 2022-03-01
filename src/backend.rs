@@ -11,11 +11,12 @@ use koopa::ir::{Function, Program, Value, ValueKind};
 use once_cell::sync::Lazy;
 
 use self::error::LabelNotExistError;
+use crate::Result;
 
 static FUNC_NAMES: Lazy<RwLock<HashMap<Function, String>>> = Lazy::new(|| RwLock::default());
 static VAR_NAMES: Lazy<RwLock<HashMap<Value, String>>> = Lazy::new(|| RwLock::default());
 
-pub fn generate_riscv(ir: &Program) -> Result<Vec<String>, Box<dyn Error>> {
+pub fn generate_riscv(ir: &Program) -> Result<Vec<String>> {
   let mut result = vec![];
 
   for (&v, vd) in ir.borrow_values().iter() {

@@ -2,10 +2,12 @@ use std::cmp;
 use std::collections::HashMap;
 use std::error::Error;
 
+use koopa::ir::{BasicBlock, FunctionData, Value, ValueKind};
+
 use super::error::LabelNotExistError;
 use super::from_value;
 use super::riscv::{inst::Inst, reg::Reg};
-use koopa::ir::{BasicBlock, FunctionData, Value, ValueKind};
+use crate::Result;
 
 static CALL_REGS: [Reg; 8] = [
   Reg::A0,
@@ -38,7 +40,7 @@ pub struct GenerateContext<'a> {
 }
 
 impl<'a> GenerateContext<'a> {
-  fn from(func: &'a FunctionData) -> Result<Self, Box<dyn Error>> {
+  fn from(func: &'a FunctionData) -> Result<Self> {
     let inst_num: i32 = func
       .layout()
       .bbs()
@@ -98,7 +100,7 @@ impl<'a> GenerateContext<'a> {
     self.insts.push(format!("  {}", inst));
   }
 
-  pub fn set_args(&mut self, args: &[Value]) -> Result<(), Box<dyn Error>> {
+  pub fn set_args(&mut self, args: &[Value]) -> Result<()> {
     for (&arg, &reg) in args.iter().zip(CALL_REGS.iter()) {
       let mut rd = reg;
       self.load_value_to_reg(arg, &mut rd)?;
@@ -126,7 +128,7 @@ impl<'a> GenerateContext<'a> {
   }
 
   /// 获取局部变量所在的内存位置（距离栈指针的偏差）
-  pub fn get_offset(&mut self, value: Value) -> Result<i32, Box<dyn Error>> {
+  pub fn get_offset(&mut self, value: Value) -> Result<i32> {
     if let Some(&offset) = self.offsets.get(&value) {
       Ok(offset)
     } else {
@@ -137,7 +139,7 @@ impl<'a> GenerateContext<'a> {
   }
 
   /// 获取 bb 对应的标签
-  pub fn get_label(&self, bb: BasicBlock) -> Result<String, Box<dyn Error>> {
+  pub fn get_label(&self, bb: BasicBlock) -> Result<String> {
     let label = self
       .labels
       .get(&bb)
@@ -146,7 +148,7 @@ impl<'a> GenerateContext<'a> {
   }
 
   /// 将 Value 加载到寄存器；必要时修改目标寄存器
-  pub fn load_value_to_reg(&mut self, value: Value, reg: &mut Reg) -> Result<(), Box<dyn Error>> {
+  pub fn load_value_to_reg(&mut self, value: Value, reg: &mut Reg) -> Result<()> {
     let kind = self.func_data.dfg().value(value).kind();
     if let ValueKind::Integer(integer) = kind {
       // Alloc a register for storing a integer.
@@ -176,14 +178,14 @@ impl<'a> GenerateContext<'a> {
   }
 
   /// 将 Value 保存到寄存器
-  pub fn save_value_from_reg(&mut self, value: Value, reg: Reg) -> Result<(), Box<dyn Error>> {
+  pub fn save_value_from_reg(&mut self, value: Value, reg: Reg) -> Result<()> {
     let offset = self.get_offset(value)?;
     self.push_inst(Inst::Sw(reg, offset, Reg::Sp));
     Ok(())
   }
 }
 
-pub fn generate(func_name: &str, func_data: &FunctionData) -> Result<Vec<String>, Box<dyn Error>> {
+pub fn generate(func_name: &str, func_data: &FunctionData) -> Result<Vec<String>> {
   let mut asm: Vec<String> = vec![format!("{}:", func_name)];
 
   let mut context = GenerateContext::from(&func_data)?;

@@ -7,6 +7,7 @@ use self::{
 };
 
 mod ast;
+mod ty;
 mod consteval;
 mod error;
 mod expr;
@@ -44,7 +45,7 @@ macro_rules! generate_prelude {
 pub fn generate_ir(input: String) -> Result<Program, Box<dyn std::error::Error>> {
   let mut ast = parser::CompUnitParser::new()
     .parse(&input)
-    .map_err(|e| CompileError(e.to_string()))?;
+    .map_err(|e| CompileError::Other(e.to_string()))?;
 
   // 参考 https://github.com/pku-minic/sysy-runtime-lib/blob/master/src/sysy.h
   // 

@@ -3,17 +3,16 @@ use koopa::ir::dfg::DataFlowGraph;
 use koopa::ir::layout::{InstList, Layout};
 use koopa::ir::{BasicBlock, Function, FunctionData, Program, Type, TypeKind, Value, ValueKind};
 use std::borrow::BorrowMut;
-use std::error::Error;
 
-use crate::frontend::ast::Param;
-
-use super::ast::{CompUnit, Decl, FuncDecl, InitVal, TypeSpec};
+use super::ast::{CompUnit, Decl, FuncDecl, Initializer, Param, TypeSpec};
 use super::consteval::Eval;
 use super::error::CompileError;
 #[allow(unused_imports)]
 use super::error::{PushKeyError, UnimplementedError};
-use super::stmt;
 use super::symbol::{Symbol, SymbolTable};
+use super::{stmt, ty};
+use crate::frontend::consteval::EvalError;
+use crate::Result;
 
 pub struct GenerateContext<'a> {
   pub program: &'a mut Program,
@@ -28,7 +27,7 @@ pub struct GenerateContext<'a> {
 }
 
 impl<'a> GenerateContext<'a> {
-  pub fn new(program: &'a mut Program, func_ast: &FuncDecl) -> Result<Self, Box<dyn Error>> {
+  pub fn new(program: &'a mut Program, func_ast: &FuncDecl) -> Result<Self> {
     let func_ir_name = format!("@{}", func_ast.ident);
     let func_ir_param: Vec<_> = func_ast
       .params
@@ -81,10 +80,7 @@ impl<'a> GenerateContext<'a> {
         this.add_inst(store)?;
 
         if !this.symbol.insert(&param_name, Symbol::Var(alloc)) {
-          Err(CompileError(format!(
-            "Multiple parameters with a same name {}",
-            &param_name
-          )))?;
+          Err(CompileError::Redefinition(param_name))?;
         }
       }
     }
@@ -98,7 +94,7 @@ impl<'a> GenerateContext<'a> {
     self.program.func_mut(self.func).layout_mut()
   }
 
-  pub fn add_bb(&mut self) -> Result<BasicBlock, Box<dyn Error>> {
+  pub fn add_bb(&mut self) -> Result<BasicBlock> {
     let name = format!("%bb{}", self.next_bb_no.next().unwrap());
     let bb = self.dfg().new_bb().basic_block(Some(name));
     self
@@ -113,7 +109,7 @@ impl<'a> GenerateContext<'a> {
     self.layout().bb_mut(bb).insts_mut()
   }
 
-  pub fn add_inst(&mut self, value: Value) -> Result<(), Box<dyn Error>> {
+  pub fn add_inst(&mut self, value: Value) -> Result<()> {
     if let Some(bb) = self.bb {
       self.insts(bb).push_key_back(value).map_err(|k| {
         let vd = self.dfg().value(k).clone();
@@ -123,21 +119,17 @@ impl<'a> GenerateContext<'a> {
     Ok(())
   }
 
-  pub fn switch_bb(
-    &mut self,
-    final_inst: Value,
-    new_bb: Option<BasicBlock>,
-  ) -> Result<(), Box<dyn Error>> {
+  pub fn switch_bb(&mut self, final_inst: Value, new_bb: Option<BasicBlock>) -> Result<()> {
     self.add_inst(final_inst)?;
     self.bb = new_bb;
     Ok(())
   }
 }
 
-pub fn generate_program(ast: CompUnit) -> Result<Program, Box<dyn Error>> {
+pub fn generate_program(ast: CompUnit) -> Result<Program> {
   let mut program = Program::new();
 
-  for decl in ast {
+  for decl in &ast {
     match decl {
       Decl::Func(decl) => {
         let name = &decl.ident;
@@ -146,10 +138,7 @@ pub fn generate_program(ast: CompUnit) -> Result<Program, Box<dyn Error>> {
         if let Some(block) = &decl.body {
           // Function definition
           if !SymbolTable::insert_global_def(name, Symbol::Func(context.func)) {
-            Err(CompileError(format!(
-              "Redefinition of function {}",
-              &decl.ident
-            )))?;
+            Err(CompileError::Redefinition(decl.ident.clone()))?;
           }
           for i in block.iter() {
             stmt::generate(i, &mut context)?;
@@ -159,45 +148,51 @@ pub fn generate_program(ast: CompUnit) -> Result<Program, Box<dyn Error>> {
           SymbolTable::insert_global_decl(name, Symbol::Func(context.func));
         }
       }
-      Decl::Const(ty, decl) => {
-        if ty == TypeSpec::Void {
-          Err(CompileError("Cannot declare variable of type void".into()))?;
+      Decl::Var(declaration) => {
+        if declaration.ty == TypeSpec::Void {
+          Err(CompileError::IllegalVoid)?;
         }
-        for i in decl {
-          let name = i.name.clone();
-          let val = i.init_val.eval(None).ok_or(CompileError(format!(
-            "Global variable {} must be initialized with constant expression",
-            &name
-          )))?;
-          if !SymbolTable::insert_global_def(&name, Symbol::Const(val)) {
-            Err(CompileError(format!("Redefinition of variable {}", &name)))?;
-          }
-        }
-      }
-      Decl::Var(ty, decl) => {
-        if ty == TypeSpec::Void {
-          Err(CompileError("Cannot declare variable of type void".into()))?;
-        }
-        for i in decl {
-          let name = i.name.clone();
-          let value = match i.init_val {
-            Some(init) => match init {
-              InitVal::Simple(exp) => {
-                let init_val = exp.eval(None).ok_or(CompileError(format!(
-                  "Global variable {} must be initialized with constant expression",
-                  &name
-                )))?;
-                program.new_value().integer(init_val)
+        for (decl, init) in &declaration.list {
+          let (ty, name) = ty::parse(decl.as_ref())?;
+          if declaration.is_const {
+            let init = init
+              .as_ref()
+              .ok_or(CompileError::InitializerRequired(name.into()))?;
+            let value = match init {
+              Initializer::Simple(init) => init.eval(None).map_err(|e| match e {
+                EvalError::NotConstexpr => CompileError::ConstexprRequired("全局常量初始化器"),
+                EvalError::CompileError(e) => e,
+              })?,
+              Initializer::Aggregate(_) => {
+                Err("Not impl: global const decl aggregate initializer".to_string())?
               }
-            },
-            None => program.new_value().zero_init(Type::get_i32()),
-          };
-          let alloc = program.new_value().global_alloc(value);
-          program
-            .borrow_mut()
-            .set_value_name(alloc, Some(format!("%{}", name)));
-          if !SymbolTable::insert_global_def(&name, Symbol::Var(alloc)) {
-            Err(CompileError(format!("Redefinition of variable {}", &name)))?;
+            };
+            if !SymbolTable::insert_global_def(&name, Symbol::Const(value)) {
+              Err(CompileError::Redefinition(name.into()))?;
+            }
+          } else {
+            let value = match init {
+              Some(init) => match init {
+                Initializer::Simple(exp) => {
+                  let init_val = exp.eval(None).map_err(|e| match e {
+                    EvalError::NotConstexpr => CompileError::ConstexprRequired("全局变量初始化器"),
+                    EvalError::CompileError(e) => e,
+                  })?;
+                  program.new_value().integer(init_val.as_int()?)
+                }
+                Initializer::Aggregate(_) => {
+                  Err("Not impl: global decl aggregate initializer".to_string())?
+                }
+              },
+              None => program.new_value().zero_init(Type::get_i32()),
+            };
+            let alloc = program.new_value().global_alloc(value);
+            program
+              .borrow_mut()
+              .set_value_name(alloc, Some(format!("%{}", name)));
+            if !SymbolTable::insert_global_def(&name, Symbol::Var(alloc)) {
+              Err(CompileError::Redefinition(name.into()))?;
+            }
           }
         }
       }

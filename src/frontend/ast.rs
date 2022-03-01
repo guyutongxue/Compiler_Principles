@@ -130,27 +130,30 @@ pub enum PrimaryExp {
 
 #[derive(Debug)]
 pub enum Decl {
-  Const(TypeSpec, Vec<ConstDef>),
-  Var(TypeSpec, Vec<VarDef>),
+  Var(DeclaratorAndInitializerList),
   Func(FuncDecl),
 }
 
 #[derive(Debug)]
-pub struct ConstDef {
-  pub name: String,
-  pub init_val: Box<Exp>,
+pub struct DeclaratorAndInitializerList {
+  pub is_const: bool,
+  pub ty: TypeSpec,
+  pub list: Vec<DeclaratorAndInitializer>,
+}
+
+pub type DeclaratorAndInitializer = (Box<Declarator>, Option<Initializer>);
+
+#[derive(Debug)]
+pub enum Declarator {
+  Ident(String),
+  Pointer(Box<Declarator>),
+  Array(Box<Declarator>, Box<Exp>),
 }
 
 #[derive(Debug)]
-pub struct VarDef {
-  pub name: String,
-  pub init_val: Option<InitVal>,
-}
-
-#[derive(Debug)]
-pub enum InitVal {
+pub enum Initializer {
   Simple(Box<Exp>),
-  // Array(Vec<Box<Exp>>),
+  Aggregate(Vec<Box<Initializer>>),
 }
 
 #[derive(Debug)]

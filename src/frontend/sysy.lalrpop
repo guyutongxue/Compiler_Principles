@@ -17,8 +17,16 @@ pub CompUnit: CompUnit = {
 }
 
 Decl: Decl = {
-  "const" <ty: TypeSpec> <defs: ConstDefList> ";" => Decl::Const(<>),
-  <ty: TypeSpec> <defs: VarDefList> ";" => Decl::Var(<>),
+  "const" <ty: TypeSpec> 
+  <list: DeclaratorAndInitializerList> ";" => Decl::Var(DeclaratorAndInitializerList {
+    <>,
+    is_const: true,
+  }),
+  <ty: TypeSpec> 
+  <list: DeclaratorAndInitializerList> ";" => Decl::Var(DeclaratorAndInitializerList {
+    <>,
+    is_const: false,
+  }),
   <ty: TypeSpec> <decl: FuncDeclarator> => Decl::Func(FuncDecl {
     func_type: ty,
     ident: decl.0,
@@ -250,38 +258,30 @@ IntConst: i32 = {
   r"0[xX][0-9a-fA-F]+" => i32::from_str_radix(&<>[2..], 16).unwrap(),
 }
 
-ConstDefList: Vec<ConstDef> = {
-  <def: ConstDef> => vec![<>],
-  <defs: ConstDefList> "," <def: ConstDef> => {
+DeclaratorAndInitializerList: Vec<DeclaratorAndInitializer> = {
+  <def: DeclaratorAndInitializer> => vec![<>],
+  <defs: DeclaratorAndInitializerList> "," <def: DeclaratorAndInitializer> => {
     defs.into_iter().chain(vec![def]).collect()
   },
 }
 
-ConstDef: ConstDef = {
-  <name: Ident> "=" <init_val: Exp> => ConstDef {
-    name: name,
-    init_val: init_val.into(),
-  },
+DeclaratorAndInitializer: DeclaratorAndInitializer = {
+  <decl: Declarator> => (decl, None),
+  <decl: Declarator> "=" <init: Initializer> => (decl, Some(init)),
 }
 
-VarDefList: Vec<VarDef> = {
-  <def: VarDef> => vec![<>],
-  <defs: VarDefList> "," <def: VarDef> => {
-    defs.into_iter().chain(vec![def]).collect()
-  },
+Initializer: Initializer = {
+  <exp: Exp> => Initializer::Simple(<>),
 }
 
-VarDef: VarDef = {
-  <name: Ident> => VarDef { 
-    <>,
-    init_val: None
-  },
-  <name: Ident> "=" <init_val: InitVal> => VarDef {
-    name: name,
-    init_val: Some(init_val.into()),
-  },
+Declarator: Box<Declarator> = {
+  <ident: Ident> => Declarator::Ident(<>).into(),
+  "*" <decl: Declarator> => Declarator::Pointer(<>).into(),
+  <decl: NonPointerDeclarator> "[" <exp: Exp> "]" => Declarator::Array(<>).into(),
 }
 
-InitVal: InitVal = {
-  <exp: Exp> => InitVal::Simple(<>.into()),
+NonPointerDeclarator: Box<Declarator> = {
+  <ident: Ident> => Declarator::Ident(<>).into(),
+  "(" "*" <decl: Declarator> ")" => Declarator::Pointer(<>).into(),
+  <decl: NonPointerDeclarator> "[" <exp: Exp> "]" => Declarator::Array(<>).into(),
 }
