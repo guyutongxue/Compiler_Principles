@@ -1,31 +1,40 @@
+use std::rc::Rc;
+
 use koopa::ir::Value;
 
 use super::ast::{
   AddExp, AddOp, EqExp, EqOp, LAndExp, LOrExp, LVal, MulExp, MulOp, PrimaryExp, RelExp, RelOp,
-  UnaryExp, UnaryOp,
+  UnaryExp, UnaryOp, Initializer, InitializerLike,
 };
 use super::error::{CompileError};
 use super::ir::GenerateContext;
 use super::symbol::{Symbol, SymbolTable};
-use crate::Result;
 
 #[derive(Debug, Clone)]
 pub struct ConstValue {
-  data: Vec<i32>,
+  pub data: Vec<i32>,
 
   /// 当以变量下标访问常量数组时，仍然需要生成数组的 IR
-  value: Option<Value>,
+  pub value: Option<Value>,
 
   /// [] 表示变量，即零维数组
-  size: Vec<usize>,
+  pub size: Vec<usize>,
 }
 
 impl ConstValue {
-  fn int(number: i32) -> Self {
+  pub fn int(number: i32) -> Self {
     Self {
       data: vec![number],
       value: None,
       size: vec![],
+    }
+  }
+
+  pub fn from(size: Vec<usize>, data: Vec<i32>) -> Self {
+    Self {
+      data,
+      value: None,
+      size,
     }
   }
 
@@ -35,6 +44,14 @@ impl ConstValue {
     } else {
       Err(CompileError::TypeMismatch("整数", "".into(), "数组"))?
     }
+  }
+
+  pub fn item(&self, index: usize) -> Option<Self> {
+    if self.size.len() == 0 { return None }
+    let step = self.size[1..].iter().fold(1, |acc, &x| acc * x);
+    let start_index = index * step;
+    let end_index = start_index + step;
+    Some(Self::from(self.size[1..].into(), self.data[start_index..end_index].into()))
   }
 }
 
@@ -200,6 +217,21 @@ impl Eval for LVal {
           },
           None => Err(CompileError::UndeclaredSymbol(ident.clone()))?,
         }
+      }
+    }
+  }
+}
+
+impl Initializer {
+  pub fn eval(&self, context: Option<&GenerateContext>) -> std::result::Result<InitializerLike<i32>, EvalError> {
+    match self {
+      Initializer::Simple(exp) => Ok(InitializerLike::<i32>::Simple(exp.eval(context)?.as_int()?)),
+      Initializer::Aggregate(aggr) => {
+        let mut result: Vec<Rc<_>> = vec![];
+        for exp in aggr {
+          result.push(exp.eval(context)?.into());
+        }
+        Ok(InitializerLike::<i32>::Aggregate(result))
       }
     }
   }

@@ -4,13 +4,14 @@ use koopa::ir::layout::{InstList, Layout};
 use koopa::ir::{BasicBlock, Function, FunctionData, Program, Type, TypeKind, Value, ValueKind};
 use std::borrow::BorrowMut;
 
-use super::ast::{CompUnit, Decl, FuncDecl, Initializer, Param, TypeSpec};
-use super::consteval::Eval;
+use super::ast::{CompUnit, Decl, Declarator, FuncDecl, Initializer, InitializerLike, TypeSpec};
+use super::consteval::{Eval, ConstValue};
 use super::error::CompileError;
 #[allow(unused_imports)]
 use super::error::{PushKeyError, UnimplementedError};
+use super::stmt::{self, get_layout};
 use super::symbol::{Symbol, SymbolTable};
-use super::{stmt, ty};
+use super::ty::{self, TyUtils};
 use crate::frontend::consteval::EvalError;
 use crate::Result;
 
@@ -26,20 +27,19 @@ pub struct GenerateContext<'a> {
   pub loop_jump_pt: Vec<(BasicBlock, BasicBlock)>,
 }
 
+fn generate_param_list(params: &Vec<Box<Declarator>>) -> Result<Vec<(Option<String>, Type)>> {
+  let mut ir = vec![];
+  for param in params {
+    let (tys, name) = ty::parse(param.as_ref())?;
+    ir.push((Some(format!("@{}", name)), tys.to_ir()));
+  }
+  Ok(ir)
+}
+
 impl<'a> GenerateContext<'a> {
   pub fn new(program: &'a mut Program, func_ast: &FuncDecl) -> Result<Self> {
     let func_ir_name = format!("@{}", func_ast.ident);
-    let func_ir_param: Vec<_> = func_ast
-      .params
-      .iter()
-      .map(|param| match param {
-        Param::Int(ident) => (Some(format!("@{}", ident)), Type::get_i32()),
-        Param::Pointer(ident) => (
-          Some(format!("@{}", ident)),
-          Type::get_pointer(Type::get_i32()),
-        ),
-      })
-      .collect();
+    let func_ir_param = generate_param_list(&func_ast.params)?;
     let func_ir_type = match func_ast.func_type {
       TypeSpec::Int => Type::get_i32(),
       TypeSpec::Void => Type::get_unit(),
@@ -67,20 +67,18 @@ impl<'a> GenerateContext<'a> {
 
       // Store parameters to local variable
       for (i, param) in func_ast.params.iter().enumerate() {
-        let param_name = match param {
-          Param::Int(ident) => ident.clone(),
-          Param::Pointer(ident) => ident.clone(),
-        };
-        let param_type = Type::get_i32();
-        let alloc = this.dfg().new_value().alloc(param_type);
+        let (_, name) = ty::parse(param.as_ref())?;
         let param = this.program.func(this.func).params()[i];
+        let param_type = this.dfg().value(param).ty().clone();
+
+        let alloc = this.dfg().new_value().alloc(param_type);
         let store = this.dfg().new_value().store(param, alloc);
 
         this.add_inst(alloc)?;
         this.add_inst(store)?;
 
-        if !this.symbol.insert(&param_name, Symbol::Var(alloc)) {
-          Err(CompileError::Redefinition(param_name))?;
+        if !this.symbol.insert(&name, Symbol::Var(alloc)) {
+          Err(CompileError::Redefinition(name.into()))?;
         }
       }
     }
@@ -127,7 +125,19 @@ impl<'a> GenerateContext<'a> {
 }
 
 pub fn generate_program(ast: CompUnit) -> Result<Program> {
-  let mut program = Program::new();
+  // 参考 https://github.com/pku-minic/sysy-runtime-lib/blob/master/src/sysy.h
+  let prelude = r#"
+decl @getint(): i32
+decl @getch(): i32
+decl @getarray(*i32): i32
+decl @putint(i32): i32
+decl @putch(i32): i32
+decl @putarray(i32, *i32): i32
+decl @starttime(): i32
+decl @stoptime(): i32
+"#;
+  let driver = koopa::front::Driver::from(prelude);
+  let mut program = driver.generate_program().unwrap();
 
   for decl in &ast {
     match decl {
@@ -153,38 +163,52 @@ pub fn generate_program(ast: CompUnit) -> Result<Program> {
           Err(CompileError::IllegalVoid)?;
         }
         for (decl, init) in &declaration.list {
-          let (ty, name) = ty::parse(decl.as_ref())?;
+          let (tys, name) = ty::parse(decl.as_ref())?;
+          println!("{:#?}", tys);
           if declaration.is_const {
             let init = init
               .as_ref()
               .ok_or(CompileError::InitializerRequired(name.into()))?;
-            let value = match init {
-              Initializer::Simple(init) => init.eval(None).map_err(|e| match e {
-                EvalError::NotConstexpr => CompileError::ConstexprRequired("全局常量初始化器"),
-                EvalError::CompileError(e) => e,
+            let value = match init.eval(None) {
+              Err(e) => Err({
+                match e {
+                  EvalError::NotConstexpr => CompileError::ConstexprRequired("全局常量初始化器"),
+                  EvalError::CompileError(e) => e,
+                }
               })?,
-              Initializer::Aggregate(_) => {
-                Err("Not impl: global const decl aggregate initializer".to_string())?
-              }
+              Ok(exp) => match &exp {
+                InitializerLike::Simple(exp) => ConstValue::int(*exp),
+                InitializerLike::Aggregate(_) => {
+                  let size = tys.get_array_size();
+                  let layout = get_layout(&size, &exp, &(|| 0))?;
+                  ConstValue::from(size, layout)
+                }
+              },
             };
             if !SymbolTable::insert_global_def(&name, Symbol::Const(value)) {
               Err(CompileError::Redefinition(name.into()))?;
             }
           } else {
             let value = match init {
-              Some(init) => match init {
-                Initializer::Simple(exp) => {
-                  let init_val = exp.eval(None).map_err(|e| match e {
+              Some(init) => match init.eval(None) {
+                Err(e) => Err({
+                  match e {
                     EvalError::NotConstexpr => CompileError::ConstexprRequired("全局变量初始化器"),
                     EvalError::CompileError(e) => e,
-                  })?;
-                  program.new_value().integer(init_val.as_int()?)
-                }
-                Initializer::Aggregate(_) => {
-                  Err("Not impl: global decl aggregate initializer".to_string())?
+                  }
+                })?,
+                Ok(exp) => match &exp {
+                  InitializerLike::Simple(int) => program.new_value().integer(*int),
+                  InitializerLike::Aggregate(_) => {
+                    let size = tys.get_array_size();
+                    let layout = get_layout(&size, &exp, &(|| 0))?;
+                    println!("{:#?}", &layout);
+                    let const_value = ConstValue::from(size, layout);
+                    const_value.to_ir(&mut program)
+                  }
                 }
               },
-              None => program.new_value().zero_init(Type::get_i32()),
+              None => program.new_value().zero_init(tys.to_ir()),
             };
             let alloc = program.new_value().global_alloc(value);
             program
@@ -236,6 +260,24 @@ fn add_extra_ret(fd: &mut FunctionData) {
         .insts_mut()
         .push_key_back(ret)
         .unwrap();
+    }
+  }
+}
+
+trait ToIr {
+  fn to_ir(&self, program: &mut Program) -> Value;
+}
+
+impl ToIr for ConstValue {
+  fn to_ir(&self, program: &mut Program) -> Value {
+    if self.size.len() == 0 {
+      return program.new_value().integer(self.data[0]);
+    } else {
+      let mut values = vec![];
+      for i in 0..self.size[0] {
+        values.push(self.item(i).unwrap().to_ir(program));
+      }
+      program.new_value().aggregate(values)
     }
   }
 }

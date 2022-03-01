@@ -4,7 +4,6 @@ mod from_value;
 mod riscv;
 
 use std::collections::HashMap;
-use std::error::Error;
 use std::sync::RwLock;
 
 use koopa::ir::{Function, Program, Value, ValueKind};
@@ -25,11 +24,15 @@ pub fn generate_riscv(ir: &Program) -> Result<Vec<String>> {
         .name()
         .clone()
         .ok_or(LabelNotExistError("alloc ???".into()))?;
-      let name = &name[1..];
-      VAR_NAMES.write()?.insert(v, name.into());
+      let mut name = name[1..].to_string();
+      // https://gitlab.eduxiji.net/pku-minic/QA-2022s/-/issues/1
+      if name == "init" {
+        name = "glb_var_init".into();
+      }
       result.push("  .data".into());
-      result.push(format!("  .globl {}", name));
-      result.push(format!("{}:", name));
+      result.push(format!("  .globl {}", &name));
+      result.push(format!("{}:", &name));
+      VAR_NAMES.write()?.insert(v, name);
       match ir.borrow_value(alloc.init()).kind() {
         ValueKind::Integer(i) => {
           let i = i.value();

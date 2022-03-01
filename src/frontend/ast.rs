@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 pub type CompUnit = Vec<Decl>;
 
 #[derive(Debug)]
@@ -14,13 +16,7 @@ pub enum TypeSpec {
   Int,
 }
 
-pub type ParamList = Vec<Param>;
-
-#[derive(Debug)]
-pub enum Param {
-  Int(String),
-  Pointer(String),
-}
+pub type ParamList = Vec<Box<Declarator>>;
 
 pub type Block = Vec<BlockItem>;
 
@@ -150,10 +146,12 @@ pub enum Declarator {
   Array(Box<Declarator>, Box<Exp>),
 }
 
+pub type Initializer = InitializerLike<Box<Exp>>;
+
 #[derive(Debug)]
-pub enum Initializer {
-  Simple(Box<Exp>),
-  Aggregate(Vec<Box<Initializer>>),
+pub enum InitializerLike<T> {
+  Simple(T),
+  Aggregate(Vec<Rc<InitializerLike<T>>>),
 }
 
 #[derive(Debug)]

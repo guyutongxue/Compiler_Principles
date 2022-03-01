@@ -2,9 +2,6 @@ use std::fmt;
 
 use std::error::Error;
 
-use lalrpop_util::ParseError;
-use lalrpop_util::lexer::Token;
-
 #[derive(Debug)]
 pub struct UnimplementedError(pub String);
 
@@ -28,6 +25,7 @@ pub enum CompileError{
   ConstexprRequired(&'static str),
   NegativeSubscript(i32, &'static str),
   InitializerRequired(String),
+  TooManyInitializers,
   Other(String),
 }
 
@@ -44,6 +42,7 @@ impl CompileError {
       Self::ConstexprRequired(ty) => format!("{}必须是常量表达式", ty),
       Self::NegativeSubscript(val, ty) => format!("不能用负数 {} {}", val, ty),
       Self::InitializerRequired(val) => format!("常量 {} 的声明需带初始化器", val),
+      Self::TooManyInitializers => "初始化器太多".into(),
       Self::Other(msg) => msg.clone(),
     }
   }
@@ -53,7 +52,7 @@ impl Error for CompileError {}
 
 impl fmt::Display for CompileError {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-    write!(f, "\x1b[0;31mCompile Error\x1b[0m {}", self.message())
+    write!(f, "\x1b[0;31m编译错误\x1b[0m {}", self.message())
   }
 }
 

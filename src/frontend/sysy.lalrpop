@@ -1,4 +1,5 @@
 use super::ast::*;
+use std::rc::Rc;
 
 grammar;
 
@@ -61,9 +62,8 @@ ParamList: ParamList = {
   }
 }
 
-Param: Param = {
-  "int" <ident: Ident> => Param::Int(ident.into()),
-  "int" "*" <ident: Ident> => Param::Pointer(ident.into()),
+Param: Box<Declarator> = {
+  "int" <decl: Declarator> => <>,
 }
 
 Block: Block = {
@@ -272,16 +272,25 @@ DeclaratorAndInitializer: DeclaratorAndInitializer = {
 
 Initializer: Initializer = {
   <exp: Exp> => Initializer::Simple(<>),
+  "{" "}" => Initializer::Aggregate(vec![]),
+  "{" <list: InitializerList> "}" => Initializer::Aggregate(<>),
+}
+
+InitializerList: Vec<Rc<Initializer>> = {
+  <init: Initializer> => vec![init.into()],
+  <list: InitializerList> "," <init: Initializer> => {
+    list.into_iter().chain(vec![init.into()]).collect()
+  },
 }
 
 Declarator: Box<Declarator> = {
   <ident: Ident> => Declarator::Ident(<>).into(),
   "*" <decl: Declarator> => Declarator::Pointer(<>).into(),
-  <decl: NonPointerDeclarator> "[" <exp: Exp> "]" => Declarator::Array(<>).into(),
+  <decl: NoPtrDeclarator> "[" <exp: Exp> "]" => Declarator::Array(<>).into(),
 }
 
-NonPointerDeclarator: Box<Declarator> = {
+NoPtrDeclarator: Box<Declarator> = {
   <ident: Ident> => Declarator::Ident(<>).into(),
   "(" "*" <decl: Declarator> ")" => Declarator::Pointer(<>).into(),
-  <decl: NonPointerDeclarator> "[" <exp: Exp> "]" => Declarator::Array(<>).into(),
+  <decl: NoPtrDeclarator> "[" <exp: Exp> "]" => Declarator::Array(<>).into(),
 }

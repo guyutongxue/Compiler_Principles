@@ -1,12 +1,16 @@
+use std::fmt::Debug;
+use std::rc::Rc;
+
 use koopa::ir::builder::LocalInstBuilder;
 use koopa::ir::Type;
 
-use super::ast::{BlockItem, Decl, Initializer, LVal, Stmt, TypeSpec};
+use super::ast::{BlockItem, Decl, Initializer, LVal, Stmt, TypeSpec, InitializerLike};
 use super::consteval::{consteval, EvalError};
 use super::error::CompileError;
+use super::expr;
 use super::ir::GenerateContext;
 use super::symbol::{Symbol, SymbolTable};
-use super::{expr, ty};
+use super::ty::{self, TyUtils};
 use crate::Result;
 
 #[allow(unused_imports)]
@@ -127,29 +131,14 @@ impl GenerateStmt for Stmt {
 impl GenerateStmt for Decl {
   fn generate(&self, context: &mut GenerateContext) -> Result<()> {
     match self {
-      // Decl::Const(ty, decl) => {
-      //   if *ty == TypeSpec::Void {
-      //     Err(CompileError("Cannot declare variable of type void".into()))?;
-      //   }
-      //   for i in decl {
-      //     let name = i.name.clone();
-      //     let val = consteval(i.init_val.as_ref(), context).ok_or(CompileError(format!(
-      //       "Constexpr variable {} must be initialized with constant expression",
-      //       &name
-      //     )))?;
-      //     if !context.symbol.insert(&name, Symbol::Const(val)) {
-      //       return Err(CompileError(format!("Redefinition of variable {}", &name)))?;
-      //     }
-      //   }
-      //   Ok(())
-      // }
       Decl::Var(declaration) => {
         if declaration.ty == TypeSpec::Void {
           Err(CompileError::IllegalVoid)?;
         }
         for (decl, init) in &declaration.list {
-          let (ty, name) = ty::parse(decl.as_ref())?;
+          let (tys, name) = ty::parse(decl.as_ref())?;
           if declaration.is_const {
+            // 局部常量声明
             let init = init
               .as_ref()
               .ok_or(CompileError::InitializerRequired(name.into()))?;
@@ -168,7 +157,8 @@ impl GenerateStmt for Decl {
               return Err(CompileError::Redefinition(name.into()))?;
             }
           } else {
-            let alloc = context.dfg().new_value().alloc(Type::get_i32());
+            // 局部变量声明
+            let alloc = context.dfg().new_value().alloc(tys.to_ir());
             context.add_inst(alloc)?;
             if let Some(ref init) = init {
               match init {
@@ -189,9 +179,65 @@ impl GenerateStmt for Decl {
         }
         Ok(())
       }
-      Decl::Func(_) => Err(CompileError::Other(
-        "Cannot declare function in block".into(),
-      ))?,
+      Decl::Func(f) => Err(CompileError::Other(format!(
+        "不能在块作用域内声明函数 {}",
+        f.ident
+      )))?,
     }
+  }
+}
+
+pub fn get_layout<T: Clone + Copy + Debug, DefaultFn: Fn() -> T>(size: &Vec<usize>, init: &InitializerLike<T>, default: &DefaultFn) -> Result<Vec<T>> {
+  match init {
+    InitializerLike::Simple(i) => Ok(vec![i.clone()]),
+    InitializerLike::Aggregate(aggr) => {
+      if size.len() == 0 {
+        return match aggr.len() {
+          0 => Ok(vec![default()]),
+          1 => get_layout(size, aggr[0].as_ref(), default),
+          _ => Err(CompileError::TooManyInitializers)?,
+        }
+      }
+      let total = size.iter().fold(1, |acc, x| acc * x);
+      if aggr.len() > total {
+        Err(CompileError::TooManyInitializers)?;
+      }
+      
+      let mut current = vec![];
+      let new_size: Vec<_> = size[1..].iter().cloned().collect();
+      let new_total = new_size.iter().fold(1, |acc, x| acc * x);
+
+      let mut i_aggr = 0;
+      let mut i_result = 0;
+      while i_aggr < aggr.len() {
+        let next_aggr;
+        if matches!(aggr[i_aggr].as_ref(), InitializerLike::Simple(_)) {
+          let mut temp_aggr = vec![];
+          let mut j = 0;
+          while j < new_total {
+            temp_aggr.push(if i_aggr + j < aggr.len() {
+              aggr[i_aggr + j].clone()
+            } else {
+              Rc::from(InitializerLike::Simple(default()))
+            });
+            j += 1;
+          }
+          next_aggr = Rc::from(InitializerLike::<T>::Aggregate(temp_aggr));
+          i_aggr += j;
+        } else {
+          next_aggr = aggr[i_aggr].clone();
+          i_aggr += 1;
+        }
+        let result = get_layout(&new_size, next_aggr.as_ref(), default)?;
+        current.extend(result);
+        i_result += new_total;
+      }
+      while i_result < total {
+        current.push(default());
+        i_result += 1;
+      }
+      println!("size: {:?}, current: {:?}", size, current);
+      Ok(current)
+    },
   }
 }
