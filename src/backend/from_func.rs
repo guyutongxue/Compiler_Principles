@@ -1,6 +1,5 @@
 use std::cmp;
 use std::collections::HashMap;
-use std::error::Error;
 
 use koopa::ir::{BasicBlock, FunctionData, Value, ValueKind};
 

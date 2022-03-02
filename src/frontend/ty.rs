@@ -4,34 +4,35 @@ use koopa::ir::Type;
 use super::ast::Declarator;
 use super::consteval::{Eval, EvalError};
 use super::error::CompileError;
+use super::ir::GenerateContext;
 use crate::Result;
 
 pub type Tys = Vec<Ty>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Ty {
   Pointer,
   Array(usize),
 }
 
-pub fn parse(declarator: &Declarator) -> Result<(Vec<Ty>, &str)> {
+pub fn parse<'a>(declarator: &'a Declarator, context: Option<&GenerateContext>) -> Result<(Vec<Ty>, &'a str)> {
   match declarator {
     Declarator::Ident(ident) => Ok((vec![], ident)),
     Declarator::Pointer(decl) => {
-      let (mut tys, ident) = parse(decl)?;
+      let (mut tys, ident) = parse(decl, context)?;
       tys.push(Ty::Pointer);
       Ok((tys, ident))
     }
     Declarator::Array(decl, exp) => {
-      let value = exp.eval(None).map_err(|e| match e {
+      let value = exp.eval(context).map_err(|e| match e {
         EvalError::NotConstexpr => CompileError::ConstexprRequired("数组长度"),
         EvalError::CompileError(e) => e,
       })?;
       let len = value.as_int()?;
       if len <= 0 {
-        return Err(CompileError::NegativeSubscript(len, "作为数组长度"))?;
+        return Err(CompileError::NegativeSubscript(len))?;
       }
-      let (mut tys, ident) = parse(decl)?;
+      let (mut tys, ident) = parse(decl, context)?;
       tys.push(Ty::Array(len as usize));
       Ok((tys, ident))
     }
@@ -45,14 +46,14 @@ pub trait TyUtils {
 
 impl TyUtils for Tys {
   fn to_ir(&self) -> Type {
-    let mut ir_ty = Type::get_i32();
-    for ty in self {
-      match ty {
-        Ty::Array(len) => ir_ty = Type::get_array(ir_ty, *len),
-        Ty::Pointer => ir_ty = Type::get_pointer(ir_ty),
+    if self.len() == 0 {
+      Type::get_i32()
+    } else {
+      match self[0] {
+        Ty::Array(len) => Type::get_array(self[1..].to_vec().to_ir(), len),
+        Ty::Pointer => Type::get_pointer(self[1..].to_vec().to_ir()),
       }
     }
-    ir_ty
   }
 
   fn get_array_size(&self) -> Vec<usize> {

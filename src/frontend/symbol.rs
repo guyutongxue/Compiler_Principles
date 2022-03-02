@@ -3,12 +3,12 @@ use std::{collections::HashMap, sync::RwLock};
 use koopa::ir::{Function, Value};
 use once_cell::sync::Lazy;
 
-use super::consteval::ConstValue;
+use super::{consteval::ConstValue, ty};
 
 #[derive(Debug, Clone)]
 pub enum Symbol {
   Const(ConstValue),
-  Var(Value),
+  Var(ty::Tys, Value),
   Func(Function),
 }
 

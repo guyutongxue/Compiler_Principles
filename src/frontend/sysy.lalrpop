@@ -63,7 +63,7 @@ ParamList: ParamList = {
 }
 
 Param: Box<Declarator> = {
-  "int" <decl: Declarator> => <>,
+  "int" <decl: ParamDeclarator> => <>,
 }
 
 Block: Block = {
@@ -160,7 +160,8 @@ AssignAndExprStmt: Stmt = {
 }
 
 ReturnStmt: Stmt = {
-  "return" <exp: Exp> ";" => Stmt::Return(<>),
+  "return" ";" => Stmt::Return(None),
+  "return" <exp: Exp> ";" => Stmt::Return(Some(<>)),
 }
 
 Exp: Box<Exp> = <exp: LOrExp> => exp;
@@ -246,6 +247,7 @@ PrimaryExp: PrimaryExp = {
 
 LVal: LVal = {
   <ident: Ident> => LVal::Ident(<>),
+  <lval: LVal> "[" <exp: Exp> "]" => LVal::Subscript(lval.into(), exp),
 }
 
 Number: i32 = <num: IntConst> => <>;
@@ -293,4 +295,21 @@ NoPtrDeclarator: Box<Declarator> = {
   <ident: Ident> => Declarator::Ident(<>).into(),
   "(" "*" <decl: Declarator> ")" => Declarator::Pointer(<>).into(),
   <decl: NoPtrDeclarator> "[" <exp: Exp> "]" => Declarator::Array(<>).into(),
+}
+
+ParamDeclarator: Box<Declarator> = {
+  <ident: Ident> => Declarator::Ident(<>).into(),
+  "*" <decl: ParamDeclarator> => Declarator::Pointer(<>).into(),
+  <decl: ParamDeclaratorArraySpec> => <>,
+}
+
+NoPtrParamDeclarator: Box<Declarator> = {
+  <ident: Ident> => Declarator::Ident(<>).into(),
+  "(" "*" <decl: ParamDeclarator> ")" => Declarator::Pointer(<>).into(),
+  <decl: ParamDeclaratorArraySpec> => <>,
+}
+
+ParamDeclaratorArraySpec: Box<Declarator> = {
+  <decl: NoPtrParamDeclarator> "[" <exp: Exp> "]" => Declarator::Array(<>).into(),
+  <decl: NoPtrParamDeclarator> "[" "]" => Declarator::Pointer(<>).into(),
 }

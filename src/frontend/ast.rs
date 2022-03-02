@@ -35,7 +35,7 @@ pub enum Stmt {
   While(Box<Exp>, Box<Stmt>),
   Break,
   Continue,
-  Return(Box<Exp>),
+  Return(Option<Box<Exp>>),
 }
 
 pub type Exp = LOrExp;
@@ -157,4 +157,5 @@ pub enum InitializerLike<T> {
 #[derive(Debug)]
 pub enum LVal {
   Ident(String),
+  Subscript(Box<LVal>, Box<Exp>),
 }

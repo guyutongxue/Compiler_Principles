@@ -24,11 +24,7 @@ pub fn generate_riscv(ir: &Program) -> Result<Vec<String>> {
         .name()
         .clone()
         .ok_or(LabelNotExistError("alloc ???".into()))?;
-      let mut name = name[1..].to_string();
-      // https://gitlab.eduxiji.net/pku-minic/QA-2022s/-/issues/1
-      if name == "init" {
-        name = "glb_var_init".into();
-      }
+      let name = name[1..].to_string();
       result.push("  .data".into());
       result.push(format!("  .globl {}", &name));
       result.push(format!("{}:", &name));

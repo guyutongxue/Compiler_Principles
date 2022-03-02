@@ -1,5 +1,4 @@
 use koopa::ir::{BinaryOp, Value, ValueKind};
-use std::error::Error;
 
 use super::from_func::GenerateContext;
 use super::riscv::inst::Inst;

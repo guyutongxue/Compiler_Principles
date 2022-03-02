@@ -1,13 +1,14 @@
 use koopa::ir::builder::{LocalInstBuilder, ValueBuilder};
-use koopa::ir::{BinaryOp, Type, Value, ValueKind};
+use koopa::ir::{BinaryOp, Type, TypeKind, Value};
 
 use super::ast::{
   AddExp, AddOp, EqExp, EqOp, LAndExp, LOrExp, LVal, MulExp, MulOp, PrimaryExp, RelExp, RelOp,
   UnaryExp, UnaryOp,
 };
-use super::consteval::{consteval, Eval, EvalError};
+use super::consteval::{Eval, EvalError};
 use super::error::CompileError;
 use super::ir::GenerateContext;
+use super::stmt::store_value_layout;
 use super::symbol::{Symbol, SymbolTable};
 use crate::Result;
 
@@ -18,12 +19,25 @@ pub fn generate<EvalExp: Eval + GenerateValue>(
   exp: &EvalExp,
   context: &mut GenerateContext,
 ) -> Result<Value> {
-  let eval_result = consteval(exp, context);
+  let eval_result = exp.eval(Some(context));
   match eval_result {
-    Ok(const_value) => {
-      // TODO!
-      let result = context.dfg().new_value().integer(const_value.as_int()?);
-      Ok(result)
+    Ok(cv) => {
+      if let Ok(int) = cv.as_int() {
+        // 如果常量表达式是整数，则直接生成整数 Value
+        Ok(context.dfg().new_value().integer(int))
+      } else {
+        // 否则，意味着使用变量下标索引常量数组；
+        // 必须将常量数组引入内存。
+        let alloc = context.dfg().new_value().alloc(cv.ir_type());
+        context.add_inst(alloc)?;
+        let data: Vec<_> = cv
+          .data
+          .iter()
+          .map(|&x| context.dfg().new_value().integer(x))
+          .collect();
+        store_value_layout(cv.size, alloc, data, context)?;
+        Ok(alloc)
+      }
     }
     Err(EvalError::NotConstexpr) => {
       return exp.generate_value(context);
@@ -213,7 +227,11 @@ impl GenerateValue for UnaryExp {
           context.add_inst(result)?;
           Ok(result)
         } else {
-          Err(CompileError::TypeMismatch("函数", func_name.clone(), "变量/常量"))?
+          Err(CompileError::TypeMismatch(
+            "函数",
+            func_name.clone(),
+            "变量/常量",
+          ))?
         }
       }
       UnaryExp::Op(op, exp) => match op {
@@ -245,7 +263,29 @@ impl GenerateValue for PrimaryExp {
         let value = context.dfg().new_value().integer(*num);
         Ok(value)
       }
-      PrimaryExp::LVal(lval) => lval.generate_value(context),
+      PrimaryExp::LVal(lval) => {
+        let val = generate(lval, context)?;
+        match context.value_ty_kind(val) {
+          TypeKind::Pointer(base) => {
+            match base.kind() {
+              // Perform array-to-pointer conversion
+              TypeKind::Array(..) => {
+                let zero = context.dfg().new_value().integer(0);
+                let elem = context.dfg().new_value().get_elem_ptr(val, zero);
+                context.add_inst(elem)?;
+                Ok(elem)
+              }
+              _ => {
+                let load = context.dfg().new_value().load(val);
+                context.add_inst(load)?;
+                Ok(load)
+              },
+            }
+          }
+          TypeKind::Int32 => Ok(val),
+          x => Err(CompileError::TypeMismatch("左值", x.to_string(), "其它"))?,
+        }
+      }
     }
   }
 }
@@ -254,42 +294,44 @@ impl GenerateValue for LVal {
   fn generate_value(&self, context: &mut GenerateContext) -> Result<Value> {
     match self {
       LVal::Ident(name) => {
-        let symbol = context.symbol.get(name);
-
+        let symbol = context
+          .symbol
+          .get(name)
+          .or_else(|| SymbolTable::get_global(name));
+        // println!("{}: {:?}", name, symbol);
         match symbol {
-          None => global_var_generate_value(name, context),
+          None => Err(CompileError::UndeclaredSymbol(name.into()))?,
           Some(symbol) => match symbol {
-            Symbol::Const(value) => {
-              Ok(context.dfg().new_value().integer(value.as_int()?))
-            }
-            Symbol::Var(val) => {
-              match context.dfg().value(val).kind() {
-                ValueKind::Alloc(_) => {
-                  let load = context.dfg().new_value().load(val);
-                  context.add_inst(load)?;
-                  Ok(load)
-                }
-                ValueKind::FuncArgRef(_) => Ok(val),
-                _ => Err(CompileError::TypeMismatch("变量/常量", name.clone(), "其它"))?,
-              }
-            }
+            Symbol::Const(_) => panic!("Constant Identifier: should unreachable"),
+            Symbol::Var(_, val) => Ok(val),
             Symbol::Func(_) => Err(CompileError::TypeMismatch("变量", name.clone(), "函数"))?,
           },
         }
       }
+      LVal::Subscript(lval, exp) => {
+        let lval = generate(lval.as_ref(), context)?;
+        let exp = generate(exp.as_ref(), context)?;
+        // println!("SUB: {:?}", context.dfg().value(lval));
+        match context.value_ty_kind(lval) {
+          TypeKind::Pointer(base) => {
+            let result = match base.kind() {
+              TypeKind::Array(_, _) => context.dfg().new_value().get_elem_ptr(lval, exp),
+              _ => {
+                let load = context.dfg().new_value().load(lval);
+                context.add_inst(load)?;
+                context.dfg().new_value().get_ptr(load, exp)
+              }
+            };
+            context.add_inst(result)?;
+            Ok(result)
+          }
+          x => Err(CompileError::TypeMismatch(
+            "可解地址的数组/指针",
+            x.to_string(),
+            "其它变量",
+          ))?,
+        }
+      }
     }
-  }
-}
-
-fn global_var_generate_value(name: &str, context: &mut GenerateContext) -> Result<Value> {
-  let symbol = SymbolTable::get_global(name).ok_or(CompileError::UndeclaredSymbol(name.into()))?;
-  match symbol {
-    Symbol::Const(value) => Ok(context.dfg().new_value().integer(value.as_int()?)),
-    Symbol::Var(val) => {
-      let load = context.dfg().new_value().load(val);
-      context.add_inst(load)?;
-      Ok(load)
-    }
-    Symbol::Func(_) => Err(CompileError::TypeMismatch("变量", name.into(), "函数"))?,
   }
 }
