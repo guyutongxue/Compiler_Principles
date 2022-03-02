@@ -51,9 +51,11 @@ pub fn generate_riscv(ir: &Program) -> Result<Vec<String>> {
   }
 
   let mut result = vec![];
+  let mut has_global_alloc = false;
 
   for (&v, vd) in ir.borrow_values().iter() {
     if let ValueKind::GlobalAlloc(alloc) = vd.kind() {
+      has_global_alloc = true;
       result.push(DEBUG_INFO.write()?.pop_front().unwrap());
       let name = vd
         .name()
@@ -77,6 +79,9 @@ pub fn generate_riscv(ir: &Program) -> Result<Vec<String>> {
 
       VAR_NAMES.write()?.insert(v, name);
     }
+  }
+  if has_global_alloc {
+    DEBUG_INFO.write()?.pop_front().unwrap();
   }
 
   for &func in ir.func_layout() {

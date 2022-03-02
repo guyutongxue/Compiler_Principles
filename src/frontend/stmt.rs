@@ -52,8 +52,9 @@ impl GenerateStmt for Stmt {
       }
       Stmt::If(exp, true_stmt, false_stmt) => {
         let cond = expr::generate(exp.as_ref(), context)?;
-        let true_bb = context.add_bb()?;
-        let end_bb = context.add_bb()?;
+        context.new_bb_set();
+        let true_bb = context.add_bb("if_true")?;
+        let end_bb = context.add_bb("if_end")?;
         match false_stmt {
           None => {
             let br = context.dfg().new_value().branch(cond, true_bb, end_bb);
@@ -61,7 +62,7 @@ impl GenerateStmt for Stmt {
             true_stmt.generate(context)?;
           }
           Some(false_stmt) => {
-            let false_bb = context.add_bb()?;
+            let false_bb = context.add_bb("if_false")?;
 
             let br = context.dfg().new_value().branch(cond, true_bb, false_bb);
             context.switch_bb(br, Some(true_bb))?;
@@ -75,9 +76,10 @@ impl GenerateStmt for Stmt {
         context.switch_bb(jump, Some(end_bb))?;
       }
       Stmt::While(exp, stmt) => {
-        let entry_bb = context.add_bb()?;
-        let body_bb = context.add_bb()?;
-        let end_bb = context.add_bb()?;
+        context.new_bb_set();
+        let entry_bb = context.add_bb("while_entry")?;
+        let body_bb = context.add_bb("while_body")?;
+        let end_bb = context.add_bb("while_end")?;
 
         let jump_into_entry = context.dfg().new_value().jump(entry_bb);
         context.switch_bb(jump_into_entry, Some(entry_bb))?;

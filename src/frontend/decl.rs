@@ -21,7 +21,7 @@ pub struct GenerateContext<'a> {
   pub bb: Option<BasicBlock>,
   pub symbol: SymbolTable,
 
-  next_bb_no: Box<dyn Iterator<Item = i32>>,
+  next_bb_no: i32,
 
   /// 循环中 break/continue 跳转位置
   pub loop_jump_pt: Vec<(BasicBlock, BasicBlock)>,
@@ -61,13 +61,13 @@ impl<'a> GenerateContext<'a> {
       func,
       bb: None,
       symbol: SymbolTable::new(),
-      next_bb_no: Box::new(0..),
+      next_bb_no: 0,
       loop_jump_pt: vec![],
     };
 
     if func_ast.body.is_some() {
       // %entry basic block
-      let entry = this.add_bb()?;
+      let entry = this.add_bb("entry")?;
       this.bb = Some(entry);
 
       // Store parameters to local variable
@@ -98,8 +98,12 @@ impl<'a> GenerateContext<'a> {
     self.program.func_mut(self.func).layout_mut()
   }
 
-  pub fn add_bb(&mut self) -> Result<BasicBlock> {
-    let name = format!("%bb{}", self.next_bb_no.next().unwrap());
+  pub fn new_bb_set(&mut self) {
+    self.next_bb_no = self.next_bb_no + 1;
+  }
+
+  pub fn add_bb(&mut self, name: &str) -> Result<BasicBlock> {
+    let name = format!("%bb_{}_{}", name, self.next_bb_no);
     let bb = self.dfg().new_bb().basic_block(Some(name));
     self
       .layout()
@@ -122,12 +126,14 @@ impl<'a> GenerateContext<'a> {
   }
 
   pub fn add_inst(&mut self, value: Value) -> Result<()> {
-    if let Some(bb) = self.bb {
-      self.insts(bb).push_key_back(value).map_err(|k| {
-        let vd = self.dfg().value(k).clone();
-        PushKeyError(Box::new(vd))
-      })?;
+    if self.bb.is_none() {
+      self.new_bb_set();
+      self.bb = Some(self.add_bb("unreachable")?);
     }
+    self.insts(self.bb.unwrap()).push_key_back(value).map_err(|k| {
+      let vd = self.dfg().value(k).clone();
+      PushKeyError(Box::new(vd))
+    })?;
     Ok(())
   }
 

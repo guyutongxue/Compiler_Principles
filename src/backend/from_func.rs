@@ -49,7 +49,7 @@ impl<'a> GenerateContext<'a> {
     let mut local_size = 0;
     let bbs = prog.func(func).layout().bbs();
     for (_, node) in bbs {
-      for (&v, _) in node.insts() {
+      for &v in node.insts().keys() {
         if let ValueKind::Alloc(_) = prog.func(func).dfg().value(v).kind() {
           locals.insert(v, local_size);
           if let TypeKind::Pointer(base) = prog.func(func).dfg().value(v).ty().kind() {
@@ -65,7 +65,7 @@ impl<'a> GenerateContext<'a> {
     let mut temps = HashMap::new();
     let mut temp_size = local_size;
     for (_, node) in bbs {
-      for (&v, _) in node.insts() {
+      for &v in node.insts().keys() {
         temps.insert(v, temp_size);
         temp_size += prog.func(func).dfg().value(v).ty().size() as i32;
       }
@@ -152,7 +152,7 @@ impl<'a> GenerateContext<'a> {
       let mut rd = reg;
       self.load_value_to_reg(arg, &mut rd)?;
       if rd != reg {
-        self.push_inst(Inst::Add(rd, Reg::Zero, reg));
+        self.push_inst(Inst::Add(reg, Reg::Zero, rd));
       }
     }
     if args.len() > 8 {
@@ -241,14 +241,14 @@ pub fn generate(program: &Program, func: Function) -> Result<Vec<String>> {
   FUNC_NAMES.write()?.insert(func, func_name.into());
   let func_name = &func_data.name()[1..];
 
+  let mut result = vec![];
   if func_data.layout().entry_bb().is_none() {
     // Function declaration, skip.
     DEBUG_INFO.write()?.pop_front();
     DEBUG_INFO.write()?.pop_front();
-    return Ok(vec![]);
+    return Ok(result);
   }
 
-  let mut result = vec![];
   result.push(DEBUG_INFO.write()?.pop_front().unwrap());
   result.push("  .text".into());
   result.push(format!("  .globl {}", func_name));
@@ -264,16 +264,16 @@ pub fn generate(program: &Program, func: Function) -> Result<Vec<String>> {
 
   for (&bb, node) in func_data.layout().bbs() {
     let label = context.get_label(bb)?;
-    result.push(DEBUG_INFO.write()?.pop_front().unwrap());
-    result.push(format!("{}:", label));
+    context.insts.push(DEBUG_INFO.write()?.pop_front().unwrap());
+    context.insts.push(format!("{}:", label));
     for &i in node.insts().keys() {
       from_value::generate(i, &mut context)?;
     }
     result.append(&mut context.insts);
+    DEBUG_INFO.write()?.pop_front();
   }
+  DEBUG_INFO.write()?.pop_front();
   result.push("".into());
-  DEBUG_INFO.write()?.pop_front();
-  DEBUG_INFO.write()?.pop_front();
 
   Ok(result)
 }

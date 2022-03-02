@@ -87,8 +87,9 @@ where
   context.add_inst(init_result)?;
   context.add_inst(lhs_op_zero)?;
 
-  let true_bb = context.add_bb()?;
-  let end_bb = context.add_bb()?;
+  context.new_bb_set();
+  let true_bb = context.add_bb("sc_if_true")?;
+  let end_bb = context.add_bb("sc_if_end")?;
   let branch = context
     .dfg()
     .new_value()
