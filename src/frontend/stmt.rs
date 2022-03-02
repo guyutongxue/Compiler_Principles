@@ -8,7 +8,7 @@ use super::ast::{BlockItem, Decl, Initializer, InitializerLike, Stmt, TypeSpec};
 use super::consteval::{ConstValue, EvalError};
 use super::error::CompileError;
 use super::expr;
-use super::ir::GenerateContext;
+use super::decl::GenerateContext;
 use super::symbol::Symbol;
 use super::ty::{self, TyUtils};
 use crate::Result;

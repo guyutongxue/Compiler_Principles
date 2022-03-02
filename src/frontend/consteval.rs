@@ -7,7 +7,7 @@ use super::ast::{
   UnaryExp, UnaryOp, Initializer, InitializerLike,
 };
 use super::error::{CompileError};
-use super::ir::GenerateContext;
+use super::decl::GenerateContext;
 use super::symbol::{Symbol, SymbolTable};
 
 #[derive(Debug, Clone)]

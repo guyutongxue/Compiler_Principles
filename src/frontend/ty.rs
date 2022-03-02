@@ -4,7 +4,7 @@ use koopa::ir::Type;
 use super::ast::Declarator;
 use super::consteval::{Eval, EvalError};
 use super::error::CompileError;
-use super::ir::GenerateContext;
+use super::decl::GenerateContext;
 use crate::Result;
 
 pub type Tys = Vec<Ty>;

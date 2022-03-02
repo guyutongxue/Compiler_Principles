@@ -156,31 +156,49 @@ pub enum Inst {
 }
 
 fn fmt_reg2(name: &str, reg1: Reg, reg2: Reg) -> String {
-  format!("{} {}, {}", name, reg1, reg2)
+  format!("  {} {}, {}", name, reg1, reg2)
 }
 
 fn fmt_reg3(name: &str, reg1: Reg, reg2: Reg, reg3: Reg) -> String {
-  format!("{} {}, {}, {}", name, reg1, reg2, reg3)
+  format!("  {} {}, {}, {}", name, reg1, reg2, reg3)
 }
 
 fn fmt_reg2_offset(name: &str, reg1: Reg, reg2: Reg, offset: i32) -> String {
-  format!("{} {}, {}({})", name, reg1, offset, reg2)
+  if offset < -2048 || offset > 2047 {
+    format!(
+      "  li t6, {}\n  add t6, t6, {}\n  {} {}, 0(t6)",
+      offset, reg2, name, reg1
+    )
+  } else {
+    format!("  {} {}, {}({})", name, reg1, offset, reg2)
+  }
 }
 
 fn fmt_reg2_imm(name: &str, reg1: Reg, reg2: Reg, imm: i32) -> String {
-  format!("{} {}, {}, {}", name, reg1, reg2, imm)
+  if imm < -2048 || imm > 2047 {
+    let len = name.len();
+    format!(
+      "  li t6, {}\n  {} {}, {}, t6",
+      imm,
+      &name[..len - 1],
+      reg1,
+      reg2
+    )
+  } else {
+    format!("  {} {}, {}, {}", name, reg1, reg2, imm)
+  }
 }
 
 fn fmt_reg_label(name: &str, reg: Reg, label: &Label) -> String {
-  format!("{} {}, {}", name, reg, label)
+  format!("  {} {}, {}", name, reg, label)
 }
 
 fn fmt_label(name: &str, label: &Label) -> String {
-  format!("{} {}", name, label)
+  format!("  {} {}", name, label)
 }
 
 fn fmt_reg_imm(name: &str, reg: Reg, imm: i32) -> String {
-  format!("{} {}, {}", name, reg, imm)
+  format!("  {} {}, {}", name, reg, imm)
 }
 
 impl fmt::Display for Inst {
@@ -190,7 +208,7 @@ impl fmt::Display for Inst {
       Inst::Bnez(rs, label) => fmt_reg_label("bnez", *rs, label),
       Inst::J(label) => fmt_label("j", label),
       Inst::Call(label) => fmt_label("call", label),
-      Inst::Ret => "ret".into(),
+      Inst::Ret => "  ret".into(),
       Inst::Lw(rd, offset, rs) => fmt_reg2_offset("lw", *rd, *rs, *offset),
       Inst::Sw(rd, offset, rs) => fmt_reg2_offset("sw", *rd, *rs, *offset),
       Inst::Add(rd, rs1, rs2) => fmt_reg3("add", *rd, *rs1, *rs2),

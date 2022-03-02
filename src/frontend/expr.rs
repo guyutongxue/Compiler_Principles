@@ -7,7 +7,7 @@ use super::ast::{
 };
 use super::consteval::{Eval, EvalError};
 use super::error::CompileError;
-use super::ir::GenerateContext;
+use super::decl::GenerateContext;
 use super::stmt::store_value_layout;
 use super::symbol::{Symbol, SymbolTable};
 use crate::Result;

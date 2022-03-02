@@ -1,11 +1,13 @@
 use std::cmp;
 use std::collections::HashMap;
 
-use koopa::ir::{BasicBlock, FunctionData, Value, ValueKind};
+use koopa::ir::dfg::DataFlowGraph;
+use koopa::ir::{BasicBlock, Function, Program, Type, TypeKind, Value, ValueKind};
 
 use super::error::LabelNotExistError;
 use super::from_value;
 use super::riscv::{inst::Inst, reg::Reg};
+use super::{DEBUG_INFO, FUNC_NAMES, VAR_NAMES};
 use crate::Result;
 
 static CALL_REGS: [Reg; 8] = [
@@ -20,11 +22,11 @@ static CALL_REGS: [Reg; 8] = [
 ];
 
 pub struct GenerateContext<'a> {
-  /// 变量到内存位置（距离栈指针偏差）的映射
-  pub offsets: HashMap<Value, i32>,
-  /// 下一个映射位置（分配局部变量时使用）
-  pub next_offset: Box<dyn Iterator<Item = i32>>,
-
+  /// 局部变量（Alloc）到内存位置的映射
+  pub locals: HashMap<Value, i32>,
+  /// 计算结果（IR Value）到内存位置（距离栈指针偏差）的映射
+  temps: HashMap<Value, i32>,
+  size_a: i32,
   size_r: i32,
   /// 栈帧大小
   pub frame_size: i32,
@@ -32,30 +34,45 @@ pub struct GenerateContext<'a> {
   /// IR 基本块到汇编标签的映射
   pub labels: HashMap<BasicBlock, String>,
 
-  /// IR 数据
-  pub func_data: &'a FunctionData,
   /// 已生成指令序列
   pub insts: Vec<String>,
+
+  /// IR 数据
+  pub program: &'a Program,
+  pub func: Function,
 }
 
 impl<'a> GenerateContext<'a> {
-  fn from(func: &'a FunctionData) -> Result<Self> {
-    let inst_num: i32 = func
-      .layout()
-      .bbs()
-      .iter()
-      .map(|(_, node)| {
-        node
-          .insts()
-          .iter()
-          .filter(|(&v, _)| !func.dfg().value(v).ty().is_unit())
-          .count() as i32
-      })
-      .sum();
+  fn from(prog: &'a Program, func: Function) -> Result<Self> {
+    // 分配局部变量空间
+    let mut locals = HashMap::new();
+    let mut local_size = 0;
+    let bbs = prog.func(func).layout().bbs();
+    for (_, node) in bbs {
+      for (&v, _) in node.insts() {
+        if let ValueKind::Alloc(_) = prog.func(func).dfg().value(v).kind() {
+          locals.insert(v, local_size);
+          if let TypeKind::Pointer(base) = prog.func(func).dfg().value(v).ty().kind() {
+            local_size += base.size() as i32;
+          } else {
+            panic!("alloc do not have pointer type");
+          };
+        }
+      }
+    }
 
-    let size_s = 4 * inst_num;
+    // 分配计算结果空间
+    let mut temps = HashMap::new();
+    let mut temp_size = local_size;
+    for (_, node) in bbs {
+      for (&v, _) in node.insts() {
+        temps.insert(v, temp_size);
+        temp_size += prog.func(func).dfg().value(v).ty().size() as i32;
+      }
+    }
 
-    let calls: Vec<_> = func
+    let calls: Vec<_> = prog
+      .func(func)
       .dfg()
       .values()
       .iter()
@@ -64,6 +81,8 @@ impl<'a> GenerateContext<'a> {
         _ => None,
       })
       .collect();
+
+    let size_s = temp_size;
     let size_r = if calls.len() > 0 { 4 } else { 0 };
     let size_a = calls
       .iter()
@@ -75,15 +94,15 @@ impl<'a> GenerateContext<'a> {
     let size = (size_s + size_r + size_a + 15) & !15;
 
     let mut this = Self {
-      offsets: HashMap::new(),
-      next_offset: Box::new((0..).map(move |i| size_a + i * 4)),
-      size_r: size_r,
+      locals,
+      temps,
+      size_a,
+      size_r,
       frame_size: size,
-
       labels: HashMap::new(),
-
-      func_data: func,
       insts: vec![],
+      program: prog,
+      func,
     };
 
     // PROLOGUE
@@ -95,8 +114,37 @@ impl<'a> GenerateContext<'a> {
     Ok(this)
   }
 
+  pub fn dfg(&self) -> &DataFlowGraph {
+    self.program.func(self.func).dfg()
+  }
+
+  pub fn value_kind(&self, v: Value) -> ValueKind {
+    self.dfg().value(v).kind().clone()
+  }
+
+  pub fn value_type(&self, value: Value) -> Type {
+    let val = self.program.func(self.func).dfg().values().get(&value);
+    if let Some(val) = val {
+      return val.ty().clone();
+    }
+    self.program.borrow_value(value).ty().clone()
+  }
+
+  pub fn is_global_value(&self, v: Value) -> Result<Option<String>> {
+    if self.dfg().values().get(&v).is_some() {
+      Ok(None)
+    } else {
+      let var = VAR_NAMES
+        .read()?
+        .get(&v)
+        .cloned()
+        .ok_or("global variable not found".to_string())?;
+      Ok(Some(var))
+    }
+  }
+
   pub fn push_inst(&mut self, inst: Inst) {
-    self.insts.push(format!("  {}", inst));
+    self.insts.push(inst.to_string());
   }
 
   pub fn set_args(&mut self, args: &[Value]) -> Result<()> {
@@ -126,14 +174,17 @@ impl<'a> GenerateContext<'a> {
     self.push_inst(Inst::Ret);
   }
 
-  /// 获取局部变量所在的内存位置（距离栈指针的偏差）
+  pub fn get_local(&self, v: Value) -> i32 {
+    *self.locals.get(&v).expect("Cannot find local var") + self.size_a
+  }
+
+  /// 获取所在的内存位置（距离栈指针的偏差）
   pub fn get_offset(&mut self, value: Value) -> Result<i32> {
-    if let Some(&offset) = self.offsets.get(&value) {
-      Ok(offset)
+    if let Some(&offset) = self.temps.get(&value) {
+      Ok(offset + self.size_a)
     } else {
-      let offset = self.next_offset.next().unwrap();
-      self.offsets.insert(value, offset);
-      Ok(offset)
+      let vd = self.dfg().value(value);
+      panic!("Where to store value {:?}?", vd);
     }
   }
 
@@ -142,13 +193,13 @@ impl<'a> GenerateContext<'a> {
     let label = self
       .labels
       .get(&bb)
-      .ok_or_else(|| LabelNotExistError(self.func_data.dfg().bb(bb).name().clone().unwrap()))?;
+      .ok_or_else(|| LabelNotExistError(self.dfg().bb(bb).name().clone().unwrap()))?;
     Ok(label.clone())
   }
 
   /// 将 Value 加载到寄存器；必要时修改目标寄存器
   pub fn load_value_to_reg(&mut self, value: Value, reg: &mut Reg) -> Result<()> {
-    let kind = self.func_data.dfg().value(value).kind();
+    let kind = self.dfg().value(value).kind();
     if let ValueKind::Integer(integer) = kind {
       // Alloc a register for storing a integer.
       let integer = integer.value();
@@ -184,10 +235,25 @@ impl<'a> GenerateContext<'a> {
   }
 }
 
-pub fn generate(func_name: &str, func_data: &FunctionData) -> Result<Vec<String>> {
-  let mut asm: Vec<String> = vec![format!("{}:", func_name)];
+pub fn generate(program: &Program, func: Function) -> Result<Vec<String>> {
+  let func_data = program.func(func);
+  let func_name = &func_data.name()[1..];
+  FUNC_NAMES.write()?.insert(func, func_name.into());
+  let func_name = &func_data.name()[1..];
 
-  let mut context = GenerateContext::from(&func_data)?;
+  if func_data.layout().entry_bb().is_none() {
+    // Function declaration, skip.
+    DEBUG_INFO.write()?.pop_front();
+    DEBUG_INFO.write()?.pop_front();
+    return Ok(vec![]);
+  }
+
+  let mut result = vec![];
+  result.push(DEBUG_INFO.write()?.pop_front().unwrap());
+  result.push("  .text".into());
+  result.push(format!("  .globl {}", func_name));
+  result.push(format!("{}:", func_name));
+  let mut context = GenerateContext::from(program, func)?;
 
   // Generate map from BB to label
   for (&bb, _) in func_data.layout().bbs() {
@@ -198,11 +264,16 @@ pub fn generate(func_name: &str, func_data: &FunctionData) -> Result<Vec<String>
 
   for (&bb, node) in func_data.layout().bbs() {
     let label = context.get_label(bb)?;
-    asm.push(format!("{}:", label));
+    result.push(DEBUG_INFO.write()?.pop_front().unwrap());
+    result.push(format!("{}:", label));
     for &i in node.insts().keys() {
       from_value::generate(i, &mut context)?;
     }
-    asm.append(&mut context.insts);
+    result.append(&mut context.insts);
   }
-  Ok(asm)
+  result.push("".into());
+  DEBUG_INFO.write()?.pop_front();
+  DEBUG_INFO.write()?.pop_front();
+
+  Ok(result)
 }

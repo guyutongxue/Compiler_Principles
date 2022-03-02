@@ -5,9 +5,9 @@ use self::error::CompileError;
 
 mod ast;
 mod consteval;
+mod decl;
 mod error;
 mod expr;
-mod ir;
 mod stmt;
 mod symbol;
 mod ty;
@@ -21,5 +21,5 @@ pub fn generate_ir(input: String) -> Result<Program, Box<dyn std::error::Error>>
     .parse(&input)
     .map_err(|e| CompileError::Other(e.to_string()))?;
 
-  ir::generate_program(ast)
+  decl::generate_program(ast)
 }
