@@ -121,6 +121,7 @@ pub enum UnaryOp {
 pub enum PrimaryExp {
   Num(i32),
   LVal(LVal),
+  Address(LVal),
   Paren(Box<Exp>),
 }
 
@@ -157,5 +158,6 @@ pub enum InitializerLike<T> {
 #[derive(Debug)]
 pub enum LVal {
   Ident(String),
+  Deref(Box<UnaryExp>),
   Subscript(Box<LVal>, Box<Exp>),
 }

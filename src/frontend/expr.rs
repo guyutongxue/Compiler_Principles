@@ -264,6 +264,10 @@ impl GenerateValue for PrimaryExp {
         let value = context.dfg().new_value().integer(*num);
         Ok(value)
       }
+      PrimaryExp::Address(lval) => {
+        let val = generate(lval, context)?;
+        Ok(val)
+      }
       PrimaryExp::LVal(lval) => {
         let val = generate(lval, context)?;
         match context.value_ty_kind(val) {
@@ -283,7 +287,6 @@ impl GenerateValue for PrimaryExp {
               },
             }
           }
-          TypeKind::Int32 => Ok(val),
           x => Err(CompileError::TypeMismatch("左值", x.to_string(), "其它"))?,
         }
       }
@@ -308,6 +311,10 @@ impl GenerateValue for LVal {
             Symbol::Func(_) => Err(CompileError::TypeMismatch("变量", name.clone(), "函数"))?,
           },
         }
+      }
+      LVal::Deref(exp) => {
+        let exp = generate(exp.as_ref(), context)?;
+        Ok(exp)
       }
       LVal::Subscript(lval, exp) => {
         let lval = generate(lval.as_ref(), context)?;

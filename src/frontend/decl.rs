@@ -50,11 +50,20 @@ impl<'a> GenerateContext<'a> {
       TypeSpec::Void => Type::get_unit(),
     };
 
-    let func = program.new_func(FunctionData::with_param_names(
-      func_ir_name,
-      func_ir_param,
-      func_ir_type,
-    ));
+    // Koopa IR 不允许重复声明函数。移除之前的声明。如果函数已有定义，则在符号表插入阶段报错。
+    let func = if let Some((&f, _)) = program
+      .funcs()
+      .iter()
+      .find(|(_, fd)| fd.name() == func_ir_name)
+    {
+      f
+    } else {
+      program.new_func(FunctionData::with_param_names(
+        func_ir_name,
+        func_ir_param,
+        func_ir_type,
+      ))
+    };
 
     let mut this = Self {
       program: program,
@@ -130,10 +139,13 @@ impl<'a> GenerateContext<'a> {
       self.new_bb_set();
       self.bb = Some(self.add_bb("unreachable")?);
     }
-    self.insts(self.bb.unwrap()).push_key_back(value).map_err(|k| {
-      let vd = self.dfg().value(k).clone();
-      PushKeyError(Box::new(vd))
-    })?;
+    self
+      .insts(self.bb.unwrap())
+      .push_key_back(value)
+      .map_err(|k| {
+        let vd = self.dfg().value(k).clone();
+        PushKeyError(Box::new(vd))
+      })?;
     Ok(())
   }
 
@@ -242,9 +254,7 @@ decl @stoptime(): i32
             let alloc = program.new_value().global_alloc(value);
             // https://gitlab.eduxiji.net/pku-minic/QA-2022s/-/issues/1
             let ir_name = format!("%{}", if name == "init" { "glb_var_init" } else { name });
-            program
-              .borrow_mut()
-              .set_value_name(alloc, Some(ir_name));
+            program.borrow_mut().set_value_name(alloc, Some(ir_name));
             if !SymbolTable::insert_global_def(&name, Symbol::Var(tys, alloc)) {
               Err(CompileError::Redefinition(name.into()))?;
             }

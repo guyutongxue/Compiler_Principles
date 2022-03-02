@@ -1,4 +1,4 @@
-# `sysyc` 《编译原理》实习
+# `sysyc` 《编译原理》实践部分
 
 ## 测试
 
@@ -20,4 +20,34 @@ docker run -it --rm -v $(pwd):/root/compiler maxxing/compiler-dev bash
 
 ```sh
 autotest -koopa -s lv1 /root/compiler
+```
+
+## 扩展语法
+
+- 函数声明；
+- 指针；取地址；解地址；
+- 字符字面量，仅可见字符和 `'\n'`。
+
+例：
+
+```cpp
+void swap(int* a, int* b);
+
+int main() {
+  int a = 42, b = 56;
+
+  swap(&a, &b);
+
+  putint(a);
+  putch(' ');
+  putint(b);
+  putch('\n');
+  return 0;
+}
+
+void swap(int* a, int* b) {
+  int tmp = *a;
+  *a = *b;
+  *b = tmp;
+}
 ```

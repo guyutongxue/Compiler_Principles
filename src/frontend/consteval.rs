@@ -206,6 +206,7 @@ impl Eval for PrimaryExp {
   fn eval(&self, context: Option<&GenerateContext>) -> EvalResult {
     match self {
       PrimaryExp::LVal(lval) => lval.eval(context),
+      PrimaryExp::Address(_) => Err(EvalError::NotConstexpr)?,
       PrimaryExp::Num(i) => Ok(ConstValue::int(*i)),
       PrimaryExp::Paren(exp) => exp.eval(context),
     }
@@ -229,6 +230,7 @@ impl Eval for LVal {
           None => Err(CompileError::UndeclaredSymbol(ident.clone()))?,
         }
       },
+      LVal::Deref(_) => Err(EvalError::NotConstexpr)?,
       LVal::Subscript(lval, exp) => {
         let exp = exp.eval(context)?.as_int()?;
         let lval = lval.eval(context)?;

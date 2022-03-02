@@ -11,7 +11,7 @@
       "program": "${workspaceRoot}/target/debug/sysyc",
       "args": [
         "temp/hello.c", 
-        "-riscv"
+        "-koopa"
       ],
       "cwd": "${workspaceRoot}",
       "sourceLanguages": [

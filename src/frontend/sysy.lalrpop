@@ -242,12 +242,19 @@ UnaryOp: UnaryOp = {
 PrimaryExp: PrimaryExp = {
   "(" <exp: Exp> ")" => PrimaryExp::Paren(<>.into()),
   <lval: LVal> => PrimaryExp::LVal(<>),
+  "&" <lval: LVal> => PrimaryExp::Address(<>),
   <num: Number> => PrimaryExp::Num(<>),
 }
 
 LVal: LVal = {
   <ident: Ident> => LVal::Ident(<>),
-  <lval: LVal> "[" <exp: Exp> "]" => LVal::Subscript(lval.into(), exp),
+  "*" <exp: UnaryExp> => LVal::Deref(<>),
+  <lval: LValNoPtr> "[" <exp: Exp> "]" => LVal::Subscript(lval.into(), exp),
+}
+
+LValNoPtr: LVal = {
+  <ident: Ident> => LVal::Ident(<>),
+  <lval: LValNoPtr> "[" <exp: Exp> "]" => LVal::Subscript(lval.into(), exp),
 }
 
 Number: i32 = <num: IntConst> => <>;
@@ -258,6 +265,8 @@ IntConst: i32 = {
   r"[1-9][0-9]*" => i32::from_str_radix(<>, 10).unwrap(),
   r"0[0-7]*" => i32::from_str_radix(<>, 8).unwrap(),
   r"0[xX][0-9a-fA-F]+" => i32::from_str_radix(&<>[2..], 16).unwrap(),
+  r"'[ -~]'" => <>.bytes().nth(1).unwrap() as i32,
+  r"'\\n'" => '\n' as i32,
 }
 
 DeclaratorAndInitializerList: Vec<DeclaratorAndInitializer> = {
