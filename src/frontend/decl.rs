@@ -5,14 +5,13 @@ use koopa::ir::{BasicBlock, Function, FunctionData, Program, Type, TypeKind, Val
 use std::borrow::BorrowMut;
 
 use super::ast::{CompUnit, Decl, Declarator, FuncDecl, InitializerLike, TypeSpec};
-use super::consteval::ConstValue;
 use super::error::CompileError;
 #[allow(unused_imports)]
 use super::error::{PushKeyError, UnimplementedError};
 use super::stmt::{self, get_layout};
+use super::symbol::ConstValue;
 use super::symbol::{Symbol, SymbolTable};
-use super::ty::{self, TyUtils};
-use crate::frontend::consteval::EvalError;
+use crate::frontend::expr::ty::SysyType;
 use crate::Result;
 
 pub struct GenerateContext<'a> {
@@ -30,7 +29,7 @@ pub struct GenerateContext<'a> {
 fn generate_param_list(params: &Vec<Box<Declarator>>) -> Result<Vec<(Option<String>, Type)>> {
   let mut ir = vec![];
   for param in params {
-    let (tys, name) = ty::parse(param.as_ref(), None)?;
+    let (tys, name) = SysyType::parse(param.as_ref(), None)?;
     let mut ir_ty = tys.to_ir();
     // Perform array-to-pointer conversion
     if let TypeKind::Array(ty, _) = ir_ty.kind() {
@@ -81,7 +80,7 @@ impl<'a> GenerateContext<'a> {
 
       // Store parameters to local variable
       for (i, param) in func_ast.params.iter().enumerate() {
-        let (tys, name) = ty::parse(param.as_ref(), None)?;
+        let (tys, name) = SysyType::parse(param.as_ref(), None)?;
         let param = this.program.func(this.func).params()[i];
         let param_type = this.dfg().value(param).ty().clone();
 
@@ -201,7 +200,7 @@ decl @stoptime(): i32
           Err(CompileError::IllegalVoid)?;
         }
         for (decl, init) in &declaration.list {
-          let (tys, name) = ty::parse(decl.as_ref(), None)?;
+          let (tys, name) = SysyType::parse(decl.as_ref(), None)?;
           if declaration.is_const {
             // 全局常量声明
             let init = init
@@ -209,12 +208,7 @@ decl @stoptime(): i32
               .ok_or(CompileError::InitializerRequired(name.into()))?;
             // 对初始化器求值；若非常量表达式报错
             let const_value = match init.eval(None) {
-              Err(e) => Err({
-                match e {
-                  EvalError::NotConstexpr => CompileError::ConstexprRequired("全局常量初始化器"),
-                  EvalError::CompileError(e) => e,
-                }
-              })?,
+              Err(e) => Err(e.to_compile_error("全局常量初始化器"))?,
               Ok(exp) => match &exp {
                 InitializerLike::Simple(exp) => ConstValue::int(*exp),
                 InitializerLike::Aggregate(_) => {
@@ -232,12 +226,7 @@ decl @stoptime(): i32
             let value = match init {
               // 对初始化器求值，转换为 IR
               Some(init) => match init.eval(None) {
-                Err(e) => Err({
-                  match e {
-                    EvalError::NotConstexpr => CompileError::ConstexprRequired("全局变量初始化器"),
-                    EvalError::CompileError(e) => e,
-                  }
-                })?,
+                Err(e) => Err(e.to_compile_error("全局变量初始化器"))?,
                 Ok(exp) => match &exp {
                   InitializerLike::Simple(int) => program.new_value().integer(*int),
                   InitializerLike::Aggregate(_) => {

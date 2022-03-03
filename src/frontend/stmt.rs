@@ -5,12 +5,12 @@ use koopa::ir::builder::{LocalInstBuilder, ValueBuilder};
 use koopa::ir::Value;
 
 use super::ast::{BlockItem, Decl, Initializer, InitializerLike, Stmt, TypeSpec};
-use super::consteval::{ConstValue, EvalError};
+use super::decl::GenerateContext;
 use super::error::CompileError;
 use super::expr;
-use super::decl::GenerateContext;
+use super::expr::ty::SysyType;
+use super::symbol::ConstValue;
 use super::symbol::Symbol;
-use super::ty::{self, TyUtils};
 use crate::Result;
 
 #[allow(unused_imports)]
@@ -131,19 +131,14 @@ impl GenerateStmt for Decl {
           Err(CompileError::IllegalVoid)?;
         }
         for (decl, init) in &declaration.list {
-          let (tys, name) = ty::parse(decl.as_ref(), Some(context))?;
+          let (tys, name) = SysyType::parse(decl.as_ref(), Some(context))?;
           if declaration.is_const {
             // 局部常量声明
             let init = init
               .as_ref()
               .ok_or(CompileError::InitializerRequired(name.into()))?;
             let const_value = match init.eval(Some(context)) {
-              Err(e) => Err({
-                match e {
-                  EvalError::NotConstexpr => CompileError::ConstexprRequired("常量初始化器"),
-                  EvalError::CompileError(e) => e,
-                }
-              })?,
+              Err(e) => Err(e.to_compile_error("常量初始化器"))?,
               Ok(exp) => match &exp {
                 InitializerLike::Simple(exp) => ConstValue::int(*exp),
                 InitializerLike::Aggregate(_) => {

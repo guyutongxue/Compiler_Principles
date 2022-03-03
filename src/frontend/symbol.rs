@@ -1,14 +1,80 @@
 use std::{collections::HashMap, sync::RwLock};
 
-use koopa::ir::{Function, Value};
+use koopa::ir::{Function, Type, Value};
 use once_cell::sync::Lazy;
 
-use super::{consteval::ConstValue, ty};
+use super::error::CompileError;
+use super::expr::ty::SysyType;
+
+#[derive(Debug, Clone)]
+pub struct ConstValue {
+  pub data: Vec<i32>,
+
+  /// 当以变量下标访问常量数组时，仍然需要生成数组的 IR
+  pub value: Option<Value>,
+
+  /// [] 表示变量，即零维数组
+  pub size: Vec<usize>,
+}
+
+impl ConstValue {
+  pub fn int(number: i32) -> Self {
+    Self {
+      data: vec![number],
+      value: None,
+      size: vec![],
+    }
+  }
+
+  pub fn from(size: Vec<usize>, data: Vec<i32>) -> Self {
+    Self {
+      data,
+      value: None,
+      size,
+    }
+  }
+
+  pub fn as_int(&self) -> std::result::Result<i32, CompileError> {
+    if self.size.len() == 0 {
+      Ok(self.data[0])
+    } else {
+      Err(CompileError::TypeMismatch("整数", "".into(), "数组"))?
+    }
+  }
+
+  pub fn item(&self, index: i32) -> std::result::Result<Self, CompileError> {
+    if self.size.len() == 0 {
+      Err(CompileError::TypeMismatch("数组", "".into(), "变量"))?
+    }
+    if index < 0 || index as usize >= self.size[0] {
+      Err(CompileError::IndexOutOfBounds(index, self.size[0]))?
+    }
+    let index = index as usize;
+    let step = self.size[1..].iter().fold(1, |acc, &x| acc * x);
+    let start_index = index * step;
+    let end_index = start_index + step;
+    Ok(Self::from(
+      self.size[1..].into(),
+      self.data[start_index..end_index].into(),
+    ))
+  }
+
+  pub fn ir_type(&self) -> Type {
+    fn ir_type_impl(size: &[usize]) -> Type {
+      if size.len() == 0 {
+        Type::get_i32()
+      } else {
+        Type::get_array(ir_type_impl(size[1..].as_ref()), size[0])
+      }
+    }
+    ir_type_impl(self.size.as_ref())
+  }
+}
 
 #[derive(Debug, Clone)]
 pub enum Symbol {
   Const(ConstValue),
-  Var(ty::Tys, Value),
+  Var(SysyType, Value),
   Func(Function),
 }
 

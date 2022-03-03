@@ -4,13 +4,11 @@ use lalrpop_util::lalrpop_mod;
 use self::error::CompileError;
 
 mod ast;
-mod consteval;
 mod decl;
 mod error;
 mod expr;
 mod stmt;
 mod symbol;
-mod ty;
 
 lalrpop_mod!(parser, "/frontend/sysy.rs");
 

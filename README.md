@@ -19,7 +19,7 @@ docker run -it --rm -v $(pwd):/root/compiler maxxing/compiler-dev bash
 在容器内的 Shell 中，键入测试命令。如：
 
 ```sh
-autotest -koopa -s lv1 /root/compiler
+autotest -w wd /root/compiler -riscv
 ```
 
 ## 扩展语法

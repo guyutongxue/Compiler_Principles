@@ -1,3 +1,6 @@
+pub mod consteval;
+pub mod ty;
+
 use koopa::ir::builder::{LocalInstBuilder, ValueBuilder};
 use koopa::ir::{BinaryOp, Type, TypeKind, Value};
 
@@ -5,12 +8,13 @@ use super::ast::{
   AddExp, AddOp, EqExp, EqOp, LAndExp, LOrExp, LVal, MulExp, MulOp, PrimaryExp, RelExp, RelOp,
   UnaryExp, UnaryOp,
 };
-use super::consteval::{Eval, EvalError};
-use super::error::CompileError;
 use super::decl::GenerateContext;
+use super::error::CompileError;
 use super::stmt::store_value_layout;
 use super::symbol::{Symbol, SymbolTable};
 use crate::Result;
+
+use consteval::{Eval, EvalError};
 
 #[allow(unused_imports)]
 use super::error::UnimplementedError;
@@ -284,7 +288,7 @@ impl GenerateValue for PrimaryExp {
                 let load = context.dfg().new_value().load(val);
                 context.add_inst(load)?;
                 Ok(load)
-              },
+              }
             }
           }
           x => Err(CompileError::TypeMismatch("左值", x.to_string(), "其它"))?,
