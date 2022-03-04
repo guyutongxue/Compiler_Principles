@@ -4,30 +4,28 @@ use std::fmt;
 
 use super::reg::Reg;
 
-pub type Label = String;
-
 #[allow(dead_code)]
 #[derive(Debug, PartialEq)]
 pub enum Inst {
   /// 伪指令
   /// - 汇编格式：`beqz rs, label`
   /// - 行为：如果 `rs` 寄存器的值等于 0，则转移到目标 `label`
-  Beqz(Reg, Label),
+  Beqz(Reg, String),
 
   /// 伪指令
   /// - 汇编格式：`bnez rs, label`
   /// - 行为：如果 `rs` 寄存器的值不等于 0，则转移到目标 `label`
-  Bnez(Reg, Label),
+  Bnez(Reg, String),
 
   /// 伪指令
   /// - 汇编格式：`j label`
   /// - 行为：无条件转移到目标 `label`
-  J(Label),
+  J(String),
 
   /// 伪指令
   /// - 汇编格式：`call label`
   /// - 行为：将后一条指令的地址存入 `ra` 寄存器，并无条件转移到目标 `label`
-  Call(Label),
+  Call(String),
 
   /// 伪指令
   /// - 汇编格式：`ret`
@@ -147,7 +145,7 @@ pub enum Inst {
   /// 伪指令
   /// - 汇编格式：`la rd, label`
   /// - 行为：将标号 `label` 的绝对地址加载到寄存器 `rd` 中
-  La(Reg, Label),
+  La(Reg, String),
 
   /// 伪指令
   /// - 汇编格式：`mv rd, rs`
@@ -189,11 +187,11 @@ fn fmt_reg2_imm(name: &str, reg1: Reg, reg2: Reg, imm: i32) -> String {
   }
 }
 
-fn fmt_reg_label(name: &str, reg: Reg, label: &Label) -> String {
+fn fmt_reg_label(name: &str, reg: Reg, label: &String) -> String {
   format!("  {} {}, {}", name, reg, label)
 }
 
-fn fmt_label(name: &str, label: &Label) -> String {
+fn fmt_label(name: &str, label: &String) -> String {
   format!("  {} {}", name, label)
 }
 

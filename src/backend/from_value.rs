@@ -7,7 +7,7 @@ use super::{error::*, DEBUG_INFO, FUNC_NAMES};
 use crate::Result;
 
 pub fn generate(value: Value, context: &mut GenerateContext) -> Result<()> {
-  context.insts.push(DEBUG_INFO.write()?.pop_front().unwrap());
+  context.insts.add_comment(DEBUG_INFO.write()?.pop_front().unwrap());
   match context.value_kind(value) {
     ValueKind::Binary(binary) => {
       let lhs = binary.lhs();

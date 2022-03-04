@@ -6,8 +6,10 @@ use koopa::ir::{BasicBlock, Function, Program, Type, TypeKind, Value, ValueKind}
 
 use super::error::LabelNotExistError;
 use super::from_value;
+use super::riscv::Riscv;
+use super::riscv::directive::Directive;
 use super::riscv::{inst::Inst, reg::Reg};
-use super::{DEBUG_INFO, FUNC_NAMES, VAR_NAMES};
+use super::{DEBUG_INFO, VAR_NAMES};
 use crate::Result;
 
 static CALL_REGS: [Reg; 8] = [
@@ -35,7 +37,7 @@ pub struct GenerateContext<'a> {
   pub labels: HashMap<BasicBlock, String>,
 
   /// 已生成指令序列
-  pub insts: Vec<String>,
+  pub insts: Riscv,
 
   /// IR 数据
   pub program: &'a Program,
@@ -100,7 +102,7 @@ impl<'a> GenerateContext<'a> {
       size_r,
       frame_size: size,
       labels: HashMap::new(),
-      insts: vec![],
+      insts: Riscv::new(),
       program: prog,
       func,
     };
@@ -144,7 +146,7 @@ impl<'a> GenerateContext<'a> {
   }
 
   pub fn push_inst(&mut self, inst: Inst) {
-    self.insts.push(inst.to_string());
+    self.insts.add_inst(inst);
   }
 
   pub fn set_args(&mut self, args: &[Value]) -> Result<()> {
@@ -235,13 +237,11 @@ impl<'a> GenerateContext<'a> {
   }
 }
 
-pub fn generate(program: &Program, func: Function) -> Result<Vec<String>> {
+pub fn generate(program: &Program, func: Function) -> Result<Riscv> {
   let func_data = program.func(func);
   let func_name = &func_data.name()[1..];
-  FUNC_NAMES.write()?.insert(func, func_name.into());
-  let func_name = &func_data.name()[1..];
 
-  let mut result = vec![];
+  let mut result = Riscv::new();
   if func_data.layout().entry_bb().is_none() {
     // Function declaration, skip.
     DEBUG_INFO.write()?.pop_front();
@@ -249,10 +249,10 @@ pub fn generate(program: &Program, func: Function) -> Result<Vec<String>> {
     return Ok(result);
   }
 
-  result.push(DEBUG_INFO.write()?.pop_front().unwrap());
-  result.push("  .text".into());
-  result.push(format!("  .globl {}", func_name));
-  result.push(format!("{}:", func_name));
+  result.add_comment(DEBUG_INFO.write()?.pop_front().unwrap());
+  result.add_directive(Directive::Text);
+  result.add_directive(Directive::Globl(func_name.into()));
+  result.add_label(func_name.into());
   let mut context = GenerateContext::from(program, func)?;
 
   // Generate map from BB to label
@@ -264,8 +264,8 @@ pub fn generate(program: &Program, func: Function) -> Result<Vec<String>> {
 
   for (&bb, node) in func_data.layout().bbs() {
     let label = context.get_label(bb)?;
-    context.insts.push(DEBUG_INFO.write()?.pop_front().unwrap());
-    context.insts.push(format!("{}:", label));
+    context.insts.add_comment(DEBUG_INFO.write()?.pop_front().unwrap());
+    context.insts.add_label(label);
     for &i in node.insts().keys() {
       from_value::generate(i, &mut context)?;
     }
@@ -273,7 +273,7 @@ pub fn generate(program: &Program, func: Function) -> Result<Vec<String>> {
     DEBUG_INFO.write()?.pop_front();
   }
   DEBUG_INFO.write()?.pop_front();
-  result.push("".into());
+  result.add_empty();
 
   Ok(result)
 }

@@ -32,8 +32,8 @@ fn compile() -> Result<()> {
       KoopaGenerator::new(output).generate_on(&ir)?;
     }
     Mode::Riscv => {
-      let insts = backend::generate_riscv(&ir)?;
-      output.write(insts.join("\n").as_bytes())?;
+      let riscv = backend::generate_riscv(&ir)?;
+      output.write(riscv.to_string().as_bytes())?;
     }
   }
   Ok(())
