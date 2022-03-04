@@ -11,7 +11,7 @@ use super::error::{PushKeyError, UnimplementedError};
 use super::stmt::{self, get_layout};
 use super::symbol::ConstValue;
 use super::symbol::{Symbol, SymbolTable};
-use crate::frontend::expr::ty::SysyType;
+use crate::frontend::expr::ty::{GetType, SysyType};
 use crate::Result;
 
 pub struct GenerateContext<'a> {
@@ -169,9 +169,9 @@ decl @stoptime(): i32
 "#;
   let driver = koopa::front::Driver::from(prelude);
   let mut program = driver.generate_program().unwrap();
-  for (func, func_data) in program.funcs() {
-    let name = &func_data.name()[1..];
-    if !SymbolTable::insert_global_def(name, Symbol::Func(*func)) {
+  for (f, fd) in program.funcs() {
+    let name = &fd.name()[1..];
+    if !SymbolTable::insert_global_def(name, Symbol::Func(SysyType::from_ir(fd.ty()), *f)) {
       Err(CompileError::Redefinition(name.to_string()))?;
     }
   }
@@ -184,7 +184,7 @@ decl @stoptime(): i32
 
         if let Some(block) = &decl.body {
           // Function definition
-          if !SymbolTable::insert_global_def(name, Symbol::Func(context.func)) {
+          if !SymbolTable::insert_global_def(name, Symbol::Func(decl.get_type(None)?, context.func)) {
             Err(CompileError::Redefinition(decl.ident.clone()))?;
           }
           for i in block.iter() {
@@ -192,7 +192,7 @@ decl @stoptime(): i32
           }
         } else {
           // Function declaration
-          SymbolTable::insert_global_decl(name, Symbol::Func(context.func));
+          SymbolTable::insert_global_decl(name, Symbol::Func(decl.get_type(None)?, context.func));
         }
       }
       Decl::Var(declaration) => {
@@ -200,7 +200,7 @@ decl @stoptime(): i32
           Err(CompileError::IllegalVoid)?;
         }
         for (decl, init) in &declaration.list {
-          let (tys, name) = SysyType::parse(decl.as_ref(), None)?;
+          let (ty, name) = SysyType::parse(decl.as_ref(), None)?;
           if declaration.is_const {
             // 全局常量声明
             let init = init
@@ -212,9 +212,9 @@ decl @stoptime(): i32
               Ok(exp) => match &exp {
                 InitializerLike::Simple(exp) => ConstValue::int(*exp),
                 InitializerLike::Aggregate(_) => {
-                  let size = tys.get_array_size();
+                  let size = ty.get_array_size();
                   let layout = get_layout(&size, &exp, &mut || 0)?;
-                  ConstValue::from(size, layout)
+                  ConstValue::from(ty, layout)
                 }
               },
             };
@@ -230,21 +230,21 @@ decl @stoptime(): i32
                 Ok(exp) => match &exp {
                   InitializerLike::Simple(int) => program.new_value().integer(*int),
                   InitializerLike::Aggregate(_) => {
-                    let size = tys.get_array_size();
+                    let size = ty.get_array_size();
                     let layout = get_layout(&size, &exp, &mut || 0)?;
                     // println!("{:#?}", &layout);
-                    let const_value = ConstValue::from(size, layout);
+                    let const_value = ConstValue::from(ty.clone(), layout);
                     const_value.to_ir(&mut program)
                   }
                 },
               },
-              None => program.new_value().zero_init(tys.to_ir()),
+              None => program.new_value().zero_init(ty.to_ir()),
             };
             let alloc = program.new_value().global_alloc(value);
             // https://gitlab.eduxiji.net/pku-minic/QA-2022s/-/issues/1
             let ir_name = format!("%{}", if name == "init" { "glb_var_init" } else { name });
             program.borrow_mut().set_value_name(alloc, Some(ir_name));
-            if !SymbolTable::insert_global_def(&name, Symbol::Var(tys, alloc)) {
+            if !SymbolTable::insert_global_def(&name, Symbol::Var(ty, alloc)) {
               Err(CompileError::Redefinition(name.into()))?;
             }
           }
@@ -300,14 +300,16 @@ trait ToIr {
 
 impl ToIr for ConstValue {
   fn to_ir(&self, program: &mut Program) -> Value {
-    if self.size.len() == 0 {
-      return program.new_value().integer(self.data[0]);
-    } else {
-      let mut values = vec![];
-      for i in 0..self.size[0] {
-        values.push(self.item(i as i32).unwrap().to_ir(program));
+    match self.ty {
+      SysyType::Int => program.new_value().integer(self.data[0]),
+      SysyType::Array(_, len) => {
+        let mut values = vec![];
+        for i in 0..len {
+          values.push(self.item(i as i32).unwrap().to_ir(program));
+        }
+        program.new_value().aggregate(values)
       }
-      program.new_value().aggregate(values)
+      _ => panic!("Expect array or int, found {:?}", self.ty),
     }
   }
 }

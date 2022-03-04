@@ -1,12 +1,15 @@
+pub mod category;
 pub mod consteval;
 pub mod ty;
 
 use koopa::ir::builder::{LocalInstBuilder, ValueBuilder};
-use koopa::ir::{BinaryOp, Type, TypeKind, Value};
+use koopa::ir::{BinaryOp, Type, Value};
+
+use self::category::Category;
 
 use super::ast::{
-  AddExp, AddOp, EqExp, EqOp, LAndExp, LOrExp, LVal, MulExp, MulOp, PrimaryExp, RelExp, RelOp,
-  UnaryExp, UnaryOp,
+  AddExp, AddOp, AssignExp, EqExp, EqOp, Exp, LAndExp, LOrExp, MulExp, MulOp, PostfixExp,
+  PrimaryExp, RelExp, RelOp, UnaryExp, UnaryOp,
 };
 use super::decl::GenerateContext;
 use super::error::CompileError;
@@ -14,16 +17,19 @@ use super::stmt::store_value_layout;
 use super::symbol::{Symbol, SymbolTable};
 use crate::Result;
 
+use category::{GetCategory, ExpectCategory};
 use consteval::{Eval, EvalError};
+use ty::GetType;
 
 #[allow(unused_imports)]
 use super::error::UnimplementedError;
 
-pub fn generate<EvalExp: Eval + GenerateValue>(
+pub fn generate<EvalExp: ToIrValue>(
   exp: &EvalExp,
   context: &mut GenerateContext,
 ) -> Result<Value> {
   let eval_result = exp.eval(Some(context));
+  exp.get_type(Some(context))?;
   match eval_result {
     Ok(cv) => {
       if let Ok(int) = cv.as_int() {
@@ -39,12 +45,12 @@ pub fn generate<EvalExp: Eval + GenerateValue>(
           .iter()
           .map(|&x| context.dfg().new_value().integer(x))
           .collect();
-        store_value_layout(cv.size, alloc, data, context)?;
+        store_value_layout(cv.ty.get_array_size(), alloc, data, context)?;
         Ok(alloc)
       }
     }
     Err(EvalError::NotConstexpr) => {
-      return exp.generate_value(context);
+      return exp.to_ir_value(context);
     }
     Err(EvalError::CompileError(error)) => {
       return Err(error)?;
@@ -52,8 +58,38 @@ pub fn generate<EvalExp: Eval + GenerateValue>(
   }
 }
 
-pub trait GenerateValue {
-  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value>;
+pub trait ToIrValue: Eval + GetType + GetCategory {
+  fn to_ir_value(&self, context: &mut GenerateContext) -> Result<Value>;
+}
+
+impl ToIrValue for Exp {
+  fn to_ir_value(&self, context: &mut GenerateContext) -> Result<Value> {
+    match self {
+      Exp::Assign(exp) => generate(exp.as_ref(), context),
+      Exp::Comma(lhs, rhs) => {
+        let _lhs = generate(lhs.as_ref(), context)?;
+        let rhs = generate(rhs.as_ref(), context)?;
+        Ok(rhs)
+      }
+    }
+  }
+}
+
+impl ToIrValue for AssignExp {
+  fn to_ir_value(&self, context: &mut GenerateContext) -> Result<Value> {
+    match self {
+      AssignExp::LOr(exp) => generate(exp.as_ref(), context),
+      AssignExp::Assign(lhs, rhs) => {
+        let lhs = lhs.expect(Category::LValue)?.generate(context)?;
+        let rhs = rhs.expect(Category::RValue)?.generate(context)?;
+        // println!("ASSIGN-L: {:?}", context.dfg().value(lhs));
+        // println!("ASSIGN-R: {:?}", context.dfg().value(rhs));
+        let store = context.dfg().new_value().store(rhs, lhs);
+        context.add_inst(store)?;
+        Ok(lhs)
+      }
+    }
+  }
 }
 
 enum ShortCircuitingOp {
@@ -68,8 +104,8 @@ fn generate_with_short_circuiting<EvalExp1, EvalExp2>(
   rhs: &EvalExp2,
 ) -> Result<Value>
 where
-  EvalExp1: GenerateValue,
-  EvalExp2: GenerateValue,
+  EvalExp1: ToIrValue,
+  EvalExp2: ToIrValue,
 {
   let zero = context.dfg().new_value().integer(0);
   let one = context.dfg().new_value().integer(1);
@@ -81,7 +117,7 @@ where
   };
   let init_result = context.dfg().new_value().store(init_value, result);
 
-  let lhs = lhs.generate_value(context)?;
+  let lhs = lhs.expect(Category::RValue)?.generate(context)?;
   let branch_op = match op {
     ShortCircuitingOp::Or => BinaryOp::Eq,
     ShortCircuitingOp::And => BinaryOp::NotEq,
@@ -100,7 +136,7 @@ where
     .branch(lhs_op_zero, true_bb, end_bb);
   context.switch_bb(branch, Some(true_bb))?;
 
-  let rhs = rhs.generate_value(context)?;
+  let rhs = rhs.expect(Category::RValue)?.generate(context)?;
   let rhs_neq_zero = context.dfg().new_value().binary(BinaryOp::NotEq, rhs, zero);
   let rhs_store = context.dfg().new_value().store(rhs, result);
   context.add_inst(rhs_neq_zero)?;
@@ -114,8 +150,8 @@ where
   Ok(load)
 }
 
-impl GenerateValue for LOrExp {
-  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value> {
+impl ToIrValue for LOrExp {
+  fn to_ir_value(&self, context: &mut GenerateContext) -> Result<Value> {
     match self {
       LOrExp::And(exp) => generate(exp.as_ref(), context),
       LOrExp::Or(lhs, rhs) => {
@@ -125,8 +161,8 @@ impl GenerateValue for LOrExp {
   }
 }
 
-impl GenerateValue for LAndExp {
-  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value> {
+impl ToIrValue for LAndExp {
+  fn to_ir_value(&self, context: &mut GenerateContext) -> Result<Value> {
     match self {
       LAndExp::Eq(exp) => generate(exp.as_ref(), context),
       LAndExp::And(lhs, rhs) => {
@@ -136,13 +172,13 @@ impl GenerateValue for LAndExp {
   }
 }
 
-impl GenerateValue for EqExp {
-  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value> {
+impl ToIrValue for EqExp {
+  fn to_ir_value(&self, context: &mut GenerateContext) -> Result<Value> {
     match self {
       EqExp::Rel(exp) => generate(exp.as_ref(), context),
       EqExp::Eq(lhs, op, rhs) => {
-        let lhs = generate(lhs.as_ref(), context)?;
-        let rhs = generate(rhs.as_ref(), context)?;
+        let lhs = lhs.expect(Category::RValue)?.generate(context)?;
+        let rhs = rhs.expect(Category::RValue)?.generate(context)?;
         let op = match op {
           EqOp::Equal => BinaryOp::Eq,
           EqOp::NotEqual => BinaryOp::NotEq,
@@ -155,13 +191,13 @@ impl GenerateValue for EqExp {
   }
 }
 
-impl GenerateValue for RelExp {
-  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value> {
+impl ToIrValue for RelExp {
+  fn to_ir_value(&self, context: &mut GenerateContext) -> Result<Value> {
     match self {
       RelExp::Add(exp) => generate(exp.as_ref(), context),
       RelExp::Rel(lhs, op, rhs) => {
-        let lhs = generate(lhs.as_ref(), context)?;
-        let rhs = generate(rhs.as_ref(), context)?;
+        let lhs = lhs.expect(Category::RValue)?.generate(context)?;
+        let rhs = rhs.expect(Category::RValue)?.generate(context)?;
         let op = match op {
           RelOp::Less => BinaryOp::Lt,
           RelOp::LessEqual => BinaryOp::Le,
@@ -176,13 +212,13 @@ impl GenerateValue for RelExp {
   }
 }
 
-impl GenerateValue for AddExp {
-  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value> {
+impl ToIrValue for AddExp {
+  fn to_ir_value(&self, context: &mut GenerateContext) -> Result<Value> {
     match self {
       AddExp::Mul(exp) => generate(exp.as_ref(), context),
       AddExp::Add(lhs, op, rhs) => {
-        let lhs = generate(lhs.as_ref(), context)?;
-        let rhs = generate(rhs.as_ref(), context)?;
+        let lhs = lhs.expect(Category::RValue)?.generate(context)?;
+        let rhs = rhs.expect(Category::RValue)?.generate(context)?;
         let op = match op {
           AddOp::Plus => BinaryOp::Add,
           AddOp::Minus => BinaryOp::Sub,
@@ -195,13 +231,13 @@ impl GenerateValue for AddExp {
   }
 }
 
-impl GenerateValue for MulExp {
-  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value> {
+impl ToIrValue for MulExp {
+  fn to_ir_value(&self, context: &mut GenerateContext) -> Result<Value> {
     match self {
       MulExp::Unary(exp) => generate(exp.as_ref(), context),
       MulExp::Mul(lhs, op, rhs) => {
-        let lhs = generate(lhs.as_ref(), context)?;
-        let rhs = generate(rhs.as_ref(), context)?;
+        let lhs = lhs.expect(Category::RValue)?.generate(context)?;
+        let rhs = rhs.expect(Category::RValue)?.generate(context)?;
         let op = match op {
           MulOp::Multiply => BinaryOp::Mul,
           MulOp::Divide => BinaryOp::Div,
@@ -215,18 +251,49 @@ impl GenerateValue for MulExp {
   }
 }
 
-impl GenerateValue for UnaryExp {
-  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value> {
+impl ToIrValue for UnaryExp {
+  fn to_ir_value(&self, context: &mut GenerateContext) -> Result<Value> {
     match self {
-      UnaryExp::Primary(exp) => exp.generate_value(context),
-      UnaryExp::Call(func_name, args) => {
+      UnaryExp::Postfix(exp) => generate(exp.as_ref(), context),
+      UnaryExp::Address(exp) => {
+        exp.expect(Category::LValue)?.generate(context)
+      }
+      UnaryExp::Deref(exp) => {
+        exp.expect(Category::RValue)?.generate(context)
+      },
+      UnaryExp::Op(op, exp) => match op {
+        UnaryOp::Positive => generate(exp.as_ref(), context),
+        UnaryOp::Negative => {
+          let value = exp.expect(Category::RValue)?.generate(context)?;
+          let zero = context.dfg().new_value().integer(0);
+          let result = context.dfg().new_value().binary(BinaryOp::Sub, zero, value);
+          context.add_inst(result)?;
+          Ok(result)
+        }
+        UnaryOp::Not => {
+          let value = exp.expect(Category::RValue)?.generate(context)?;
+          let zero = context.dfg().new_value().integer(0);
+          let result = context.dfg().new_value().binary(BinaryOp::Eq, value, zero);
+          context.add_inst(result)?;
+          Ok(result)
+        }
+      },
+    }
+  }
+}
+
+impl ToIrValue for PostfixExp {
+  fn to_ir_value(&self, context: &mut GenerateContext) -> Result<Value> {
+    match self {
+      PostfixExp::Primary(exp) => generate(exp, context),
+      PostfixExp::Call(func_name, args) => {
         let func = SymbolTable::get_global(func_name)
           .ok_or(CompileError::UndeclaredSymbol(func_name.clone()))?;
 
-        if let Symbol::Func(func) = func {
+        if let Symbol::Func(_, func) = func {
           let args = args
             .iter()
-            .map(|arg| generate(arg.as_ref(), context))
+            .map(|arg| arg.expect(Category::RValue)?.generate(context))
             .collect::<Result<Vec<_>>>()?;
           let result = context.dfg().new_value().call(func, args);
           context.add_inst(result)?;
@@ -239,109 +306,38 @@ impl GenerateValue for UnaryExp {
           ))?
         }
       }
-      UnaryExp::Op(op, exp) => match op {
-        UnaryOp::Positive => generate(exp.as_ref(), context),
-        UnaryOp::Negative => {
-          let value = generate(exp.as_ref(), context)?;
-          let zero = context.dfg().new_value().integer(0);
-          let result = context.dfg().new_value().binary(BinaryOp::Sub, zero, value);
-          context.add_inst(result)?;
-          Ok(result)
-        }
-        UnaryOp::Not => {
-          let value = generate(exp.as_ref(), context)?;
-          let zero = context.dfg().new_value().integer(0);
-          let result = context.dfg().new_value().binary(BinaryOp::Eq, value, zero);
-          context.add_inst(result)?;
-          Ok(result)
-        }
-      },
+      PostfixExp::Subscript(lhs, rhs) => {
+        let lhs = lhs.expect(Category::RValue)?.generate(context)?;
+        let rhs = rhs.expect(Category::RValue)?.generate(context)?;
+        // println!("SUB: {:?}", context.dfg().value(lhs));
+        let result = context.dfg().new_value().get_ptr(lhs, rhs);
+        context.add_inst(result)?;
+        Ok(result)
+      }
     }
   }
 }
 
-impl GenerateValue for PrimaryExp {
-  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value> {
+impl ToIrValue for PrimaryExp {
+  fn to_ir_value(&self, context: &mut GenerateContext) -> Result<Value> {
     match self {
       PrimaryExp::Paren(exp) => generate(exp.as_ref(), context),
       PrimaryExp::Num(num) => {
         let value = context.dfg().new_value().integer(*num);
         Ok(value)
       }
-      PrimaryExp::Address(lval) => {
-        let val = generate(lval, context)?;
-        Ok(val)
-      }
-      PrimaryExp::LVal(lval) => {
-        let val = generate(lval, context)?;
-        match context.value_ty_kind(val) {
-          TypeKind::Pointer(base) => {
-            match base.kind() {
-              // Perform array-to-pointer conversion
-              TypeKind::Array(..) => {
-                let zero = context.dfg().new_value().integer(0);
-                let elem = context.dfg().new_value().get_elem_ptr(val, zero);
-                context.add_inst(elem)?;
-                Ok(elem)
-              }
-              _ => {
-                let load = context.dfg().new_value().load(val);
-                context.add_inst(load)?;
-                Ok(load)
-              }
-            }
-          }
-          x => Err(CompileError::TypeMismatch("左值", x.to_string(), "其它"))?,
-        }
-      }
-    }
-  }
-}
-
-impl GenerateValue for LVal {
-  fn generate_value(&self, context: &mut GenerateContext) -> Result<Value> {
-    match self {
-      LVal::Ident(name) => {
+      PrimaryExp::Ident(lval) => {
         let symbol = context
           .symbol
-          .get(name)
-          .or_else(|| SymbolTable::get_global(name));
-        // println!("{}: {:?}", name, symbol);
+          .get(lval)
+          .or_else(|| SymbolTable::get_global(lval));
         match symbol {
-          None => Err(CompileError::UndeclaredSymbol(name.into()))?,
+          None => Err(CompileError::UndeclaredSymbol(lval.into()))?,
           Some(symbol) => match symbol {
-            Symbol::Const(_) => panic!("Constant Identifier: should unreachable"),
+            Symbol::Const(_) => panic!("constant identifier: should unreachable"),
             Symbol::Var(_, val) => Ok(val),
-            Symbol::Func(_) => Err(CompileError::TypeMismatch("变量", name.clone(), "函数"))?,
+            Symbol::Func(..) => Err(CompileError::TypeMismatch("变量", lval.clone(), "函数"))?,
           },
-        }
-      }
-      LVal::Deref(exp) => {
-        let exp = generate(exp.as_ref(), context)?;
-        Ok(exp)
-      }
-      LVal::Subscript(lval, exp) => {
-        let lval = generate(lval.as_ref(), context)?;
-        let exp = generate(exp.as_ref(), context)?;
-        // println!("SUB: {:?}", context.dfg().value(lval));
-        match context.value_ty_kind(lval) {
-          TypeKind::Pointer(base) => {
-            let result = match base.kind() {
-              TypeKind::Array(_, _) => context.dfg().new_value().get_elem_ptr(lval, exp),
-              _ => {
-                let load = context.dfg().new_value().load(lval);
-                context.add_inst(load)?;
-                context.dfg().new_value().get_ptr(load, exp)
-              }
-            };
-            context.add_inst(result)?;
-            Ok(result)
-          }
-          x => Err(CompileError::TypeMismatch(
-            "可解地址的数组/指针",
-            x.to_string(),
-            "其它变量",
-          ))?,
         }
       }
     }

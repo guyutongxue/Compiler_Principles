@@ -26,6 +26,7 @@ pub enum CompileError{
   IndexOutOfBounds(i32, usize),
   InitializerRequired(String),
   TooManyInitializers,
+  NotLValue,
   Other(String),
 }
 
@@ -43,6 +44,7 @@ impl CompileError {
       Self::IndexOutOfBounds(val, lim) => format!("数组索引 {} 超出范围 [0, {})", val, lim),
       Self::InitializerRequired(val) => format!("常量 {} 的声明需带初始化器", val),
       Self::TooManyInitializers => "初始化器太多".into(),
+      Self::NotLValue => "不是左值".into(),
       Self::Other(msg) => msg.clone(),
     }
   }

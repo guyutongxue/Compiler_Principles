@@ -13,8 +13,8 @@ pub struct ConstValue {
   /// 当以变量下标访问常量数组时，仍然需要生成数组的 IR
   pub value: Option<Value>,
 
-  /// [] 表示变量，即零维数组
-  pub size: Vec<usize>,
+  pub ty: SysyType,
+  size: Vec<usize>,
 }
 
 impl ConstValue {
@@ -22,15 +22,17 @@ impl ConstValue {
     Self {
       data: vec![number],
       value: None,
+      ty: SysyType::Int,
       size: vec![],
     }
   }
 
-  pub fn from(size: Vec<usize>, data: Vec<i32>) -> Self {
+  pub fn from(ty: SysyType, data: Vec<i32>) -> Self {
     Self {
       data,
       value: None,
-      size,
+      size: ty.get_array_size(),
+      ty,
     }
   }
 
@@ -43,8 +45,11 @@ impl ConstValue {
   }
 
   pub fn item(&self, index: i32) -> std::result::Result<Self, CompileError> {
-    if self.size.len() == 0 {
-      Err(CompileError::TypeMismatch("数组", "".into(), "变量"))?
+    let ele_ty;
+    if let SysyType::Array(ty, _) = &self.ty {
+      ele_ty = ty;
+    } else {
+      return Err(CompileError::TypeMismatch("数组", "".into(), "整数"));
     }
     if index < 0 || index as usize >= self.size[0] {
       Err(CompileError::IndexOutOfBounds(index, self.size[0]))?
@@ -54,7 +59,7 @@ impl ConstValue {
     let start_index = index * step;
     let end_index = start_index + step;
     Ok(Self::from(
-      self.size[1..].into(),
+      ele_ty.as_ref().clone(),
       self.data[start_index..end_index].into(),
     ))
   }
@@ -75,7 +80,7 @@ impl ConstValue {
 pub enum Symbol {
   Const(ConstValue),
   Var(SysyType, Value),
-  Func(Function),
+  Func(SysyType, Function),
 }
 
 pub struct SymbolTable(Vec<HashMap<String, Symbol>>);

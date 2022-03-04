@@ -1,12 +1,12 @@
 use std::rc::Rc;
 
-use crate::frontend::ast::{
-  AddExp, AddOp, EqExp, EqOp, LAndExp, LOrExp, LVal, MulExp, MulOp, PrimaryExp, RelExp, RelOp,
-  UnaryExp, UnaryOp, Initializer, InitializerLike,
-};
-use crate::frontend::error::{CompileError};
 use super::GenerateContext;
-use crate::frontend::symbol::{Symbol, SymbolTable, ConstValue};
+use crate::frontend::ast::{
+  AddExp, AddOp, AssignExp, EqExp, EqOp, Exp, Initializer, InitializerLike, LAndExp, LOrExp,
+  MulExp, MulOp, PostfixExp, PrimaryExp, RelExp, RelOp, UnaryExp, UnaryOp,
+};
+use crate::frontend::error::CompileError;
+use crate::frontend::symbol::{ConstValue, Symbol, SymbolTable};
 
 pub enum EvalError {
   NotConstexpr,
@@ -32,6 +32,27 @@ pub type EvalResult = std::result::Result<ConstValue, EvalError>;
 
 pub trait Eval {
   fn eval(&self, context: Option<&GenerateContext>) -> EvalResult;
+}
+
+impl Eval for Exp {
+  fn eval(&self, context: Option<&GenerateContext>) -> EvalResult {
+    match self {
+      Exp::Assign(exp) => exp.eval(context),
+      Exp::Comma(..) => Err(EvalError::NotConstexpr),
+    }
+  }
+}
+
+impl Eval for AssignExp {
+  fn eval(&self, context: Option<&GenerateContext>) -> EvalResult {
+    match self {
+      AssignExp::LOr(exp) => exp.eval(context),
+      AssignExp::Assign(_, rhs) => match context {
+        None => rhs.eval(None),
+        Some(_) => Err(EvalError::NotConstexpr),
+      }
+    }
+  }
 }
 
 impl Eval for LOrExp {
@@ -134,8 +155,7 @@ impl Eval for MulExp {
 impl Eval for UnaryExp {
   fn eval(&self, context: Option<&GenerateContext>) -> EvalResult {
     match self {
-      UnaryExp::Primary(exp) => exp.eval(context),
-      UnaryExp::Call(..) => Err(EvalError::NotConstexpr)?,
+      UnaryExp::Postfix(exp) => exp.eval(context),
       UnaryExp::Op(op, exp) => {
         let exp = exp.eval(context)?.as_int()?;
         let result = match op {
@@ -145,6 +165,22 @@ impl Eval for UnaryExp {
         };
         Ok(ConstValue::int(result))
       }
+      UnaryExp::Deref(_) => Err(EvalError::NotConstexpr),
+      &UnaryExp::Address(_) => Err(EvalError::NotConstexpr),
+    }
+  }
+}
+
+impl Eval for PostfixExp {
+  fn eval(&self, context: Option<&GenerateContext>) -> EvalResult {
+    match self {
+      PostfixExp::Primary(exp) => exp.eval(context),
+      PostfixExp::Call(..) => Err(EvalError::NotConstexpr),
+      PostfixExp::Subscript(lval, exp) => {
+        let exp = exp.eval(context)?.as_int()?;
+        let lval = lval.eval(context)?;
+        lval.item(exp).map_err(|e| EvalError::CompileError(e))
+      }
     }
   }
 }
@@ -152,43 +188,34 @@ impl Eval for UnaryExp {
 impl Eval for PrimaryExp {
   fn eval(&self, context: Option<&GenerateContext>) -> EvalResult {
     match self {
-      PrimaryExp::LVal(lval) => lval.eval(context),
-      PrimaryExp::Address(_) => Err(EvalError::NotConstexpr)?,
-      PrimaryExp::Num(i) => Ok(ConstValue::int(*i)),
-      PrimaryExp::Paren(exp) => exp.eval(context),
-    }
-  }
-}
-
-impl Eval for LVal {
-  fn eval(&self, context: Option<&GenerateContext>) -> EvalResult {
-    match self {
-      LVal::Ident(ident) => {
+      PrimaryExp::Ident(ident) => {
         let symbol = match context {
-          Some(context) => context.symbol.get(ident).or_else(|| SymbolTable::get_global(ident)),
+          Some(context) => context
+            .symbol
+            .get(ident)
+            .or_else(|| SymbolTable::get_global(ident)),
           None => SymbolTable::get_global(ident),
         };
         match symbol {
           Some(symbol) => match symbol {
             Symbol::Const(i) => Ok(i.clone()),
             Symbol::Var(..) => Err(EvalError::NotConstexpr)?,
-            Symbol::Func(_) => Err(CompileError::TypeMismatch("变量", ident.clone(), "函数"))?,
+            Symbol::Func(..) => Err(CompileError::TypeMismatch("变量", ident.clone(), "函数"))?,
           },
           None => Err(CompileError::UndeclaredSymbol(ident.clone()))?,
         }
-      },
-      LVal::Deref(_) => Err(EvalError::NotConstexpr)?,
-      LVal::Subscript(lval, exp) => {
-        let exp = exp.eval(context)?.as_int()?;
-        let lval = lval.eval(context)?;
-        lval.item(exp).map_err(|e| EvalError::CompileError(e))
-      },
+      }
+      PrimaryExp::Num(i) => Ok(ConstValue::int(*i)),
+      PrimaryExp::Paren(exp) => exp.eval(context),
     }
   }
 }
 
 impl Initializer {
-  pub fn eval(&self, context: Option<&GenerateContext>) -> std::result::Result<InitializerLike<i32>, EvalError> {
+  pub fn eval(
+    &self,
+    context: Option<&GenerateContext>,
+  ) -> std::result::Result<InitializerLike<i32>, EvalError> {
     match self {
       Initializer::Simple(exp) => Ok(InitializerLike::Simple(exp.eval(context)?.as_int()?)),
       Initializer::Aggregate(aggr) => {

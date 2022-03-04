@@ -18,6 +18,16 @@ pub CompUnit: CompUnit = {
 }
 
 Decl: Decl = {
+  <decl: BlockDecl> => <>,
+  <ty: TypeSpec> <decl: FuncDeclarator> => Decl::Func(FuncDecl {
+    func_type: ty,
+    ident: decl.0,
+    params: decl.1,
+    body: decl.2,
+  }),
+}
+
+BlockDecl: Decl = {
   "const" <ty: TypeSpec> 
   <list: DeclaratorAndInitializerList> ";" => Decl::Var(DeclaratorAndInitializerList {
     <>,
@@ -27,13 +37,7 @@ Decl: Decl = {
   <list: DeclaratorAndInitializerList> ";" => Decl::Var(DeclaratorAndInitializerList {
     <>,
     is_const: false,
-  }),
-  <ty: TypeSpec> <decl: FuncDeclarator> => Decl::Func(FuncDecl {
-    func_type: ty,
-    ident: decl.0,
-    params: decl.1,
-    body: decl.2,
-  }),
+  })
 }
 
 FuncDeclarator: (String, ParamList, Option<Block>) = {
@@ -92,7 +96,7 @@ Stmt: Stmt = {
 
 PrimaryStmt: Stmt = {
   <s: Block> => Stmt::Block(<>.into()),
-  <s: AssignAndExprStmt> => <>,
+  <s: ExprStmt> => <>,
   <s: ReturnStmt> => <>,
   "break" ";" => Stmt::Break,
   "continue" ";" => Stmt::Continue,
@@ -153,8 +157,7 @@ WhileStmtNoShortIf: Stmt = {
   ),
 }
 
-AssignAndExprStmt: Stmt = {
-  <lval: LVal> "=" <exp: Exp> ";" => Stmt::Assign(<>),
+ExprStmt: Stmt = {
   ";" => Stmt::Exp(None),
   <exp: Exp> ";" => Stmt::Exp(Some(<>)),
 }
@@ -164,7 +167,15 @@ ReturnStmt: Stmt = {
   "return" <exp: Exp> ";" => Stmt::Return(Some(<>)),
 }
 
-Exp: Box<Exp> = <exp: LOrExp> => exp;
+Exp: Box<Exp> = {
+  <exp: AssignExp> => Exp::Assign(<>).into(),
+  <lhs: Exp> "," <rhs: AssignExp> => Exp::Comma(<>).into(),
+}
+
+AssignExp: Box<AssignExp> = {
+  <exp: LOrExp> => AssignExp::LOr(<>).into(),
+  <lhs: LOrExp> "=" <rhs: AssignExp> => AssignExp::Assign(<>).into(),
+}
 
 LOrExp: Box<LOrExp> = {
   <exp: LAndExp> => LOrExp::And(<>).into(),
@@ -220,15 +231,22 @@ MulOp: MulOp = {
 }
 
 UnaryExp: Box<UnaryExp> = {
-  <exp: PrimaryExp> => UnaryExp::Primary(exp).into(),
-  <func: Ident> "(" ")" => UnaryExp::Call(func, vec![]).into(),
-  <func: Ident> "(" <args: ArgList> ")" => UnaryExp::Call(func, args).into(),
+  <exp: PostfixExp> => UnaryExp::Postfix(<>).into(),
+  "*" <exp: UnaryExp> => UnaryExp::Deref(<>).into(),
+  "&" <exp: UnaryExp> => UnaryExp::Address(<>).into(),
   <op: UnaryOp> <exp: UnaryExp> => UnaryExp::Op(op, exp.into()).into(),
 }
 
-ArgList: Vec<Box<Exp>> = {
-  <exp: Exp> => vec![exp],
-  <args: ArgList> "," <exp: Exp> => {
+PostfixExp: Box<PostfixExp> = {
+  <exp: PrimaryExp> => PostfixExp::Primary(<>).into(),
+  <lhs: PostfixExp> "[" <rhs: Exp> "]" => PostfixExp::Subscript(<>).into(),
+  <func: Ident> "(" ")" => PostfixExp::Call(func, vec![]).into(),
+  <func: Ident> "(" <args: ArgList> ")" => PostfixExp::Call(func, args).into(),
+}
+
+ArgList: Vec<Box<AssignExp>> = {
+  <exp: AssignExp> => vec![exp],
+  <args: ArgList> "," <exp: AssignExp> => {
     args.into_iter().chain(vec![exp]).collect()
   },
 }
@@ -241,20 +259,8 @@ UnaryOp: UnaryOp = {
 
 PrimaryExp: PrimaryExp = {
   "(" <exp: Exp> ")" => PrimaryExp::Paren(<>.into()),
-  <lval: LVal> => PrimaryExp::LVal(<>),
-  "&" <lval: LVal> => PrimaryExp::Address(<>),
   <num: Number> => PrimaryExp::Num(<>),
-}
-
-LVal: LVal = {
-  <ident: Ident> => LVal::Ident(<>),
-  "*" <exp: UnaryExp> => LVal::Deref(<>),
-  <lval: LValNoPtr> "[" <exp: Exp> "]" => LVal::Subscript(lval.into(), exp),
-}
-
-LValNoPtr: LVal = {
-  <ident: Ident> => LVal::Ident(<>),
-  <lval: LValNoPtr> "[" <exp: Exp> "]" => LVal::Subscript(lval.into(), exp),
+  <ident: Ident> => PrimaryExp::Ident(<>),
 }
 
 Number: i32 = <num: IntConst> => <>;
@@ -282,7 +288,7 @@ DeclaratorAndInitializer: DeclaratorAndInitializer = {
 }
 
 Initializer: Initializer = {
-  <exp: Exp> => Initializer::Simple(<>),
+  <exp: AssignExp> => Initializer::Simple(<>),
   "{" "}" => Initializer::Aggregate(vec![]),
   "{" <list: InitializerList> "}" => Initializer::Aggregate(<>),
 }

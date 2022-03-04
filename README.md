@@ -25,12 +25,13 @@ autotest -w wd /root/compiler -riscv
 ## 扩展语法
 
 - 函数声明；
+- 赋值**表达式**（返回左值）；逗号表达式；
 - 指针；取地址；解地址；
 - 字符字面量，仅可见字符和 `'\n'`。
 
 例：
 
-```cpp
+```c
 void swap(int* a, int* b);
 
 int main() {
@@ -38,10 +39,8 @@ int main() {
 
   swap(&a, &b);
 
-  putint(a);
-  putch(' ');
-  putint(b);
-  putch('\n');
+  putint(a), putch(' ');
+  putint(b), putch('\n');
   return 0;
 }
 

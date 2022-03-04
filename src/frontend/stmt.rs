@@ -8,6 +8,7 @@ use super::ast::{BlockItem, Decl, Initializer, InitializerLike, Stmt, TypeSpec};
 use super::decl::GenerateContext;
 use super::error::CompileError;
 use super::expr;
+use super::expr::category::{Category, ExpectCategory};
 use super::expr::ty::SysyType;
 use super::symbol::ConstValue;
 use super::symbol::Symbol;
@@ -30,14 +31,6 @@ trait GenerateStmt {
 impl GenerateStmt for Stmt {
   fn generate(&self, context: &mut GenerateContext) -> Result<()> {
     match self {
-      Stmt::Assign(lval, exp) => {
-        let lval = expr::generate(lval, context)?;
-        let exp = expr::generate(exp.as_ref(), context)?;
-        // println!("ASSIGN-L: {:?}", context.dfg().value(lval));
-        // println!("ASSIGN-R: {:?}", context.dfg().value(exp));
-        let store = context.dfg().new_value().store(exp, lval);
-        context.add_inst(store)?;
-      }
       Stmt::Exp(exp) => {
         if let Some(exp) = exp {
           expr::generate(exp.as_ref(), context)?;
@@ -51,7 +44,7 @@ impl GenerateStmt for Stmt {
         context.symbol.pop();
       }
       Stmt::If(exp, true_stmt, false_stmt) => {
-        let cond = expr::generate(exp.as_ref(), context)?;
+        let cond = exp.expect(Category::RValue)?.generate(context)?;
         context.new_bb_set();
         let true_bb = context.add_bb("if_true")?;
         let end_bb = context.add_bb("if_end")?;
@@ -84,7 +77,7 @@ impl GenerateStmt for Stmt {
         let jump_into_entry = context.dfg().new_value().jump(entry_bb);
         context.switch_bb(jump_into_entry, Some(entry_bb))?;
 
-        let cond = expr::generate(exp.as_ref(), context)?;
+        let cond = exp.expect(Category::RValue)?.generate(context)?;
         let br = context.dfg().new_value().branch(cond, body_bb, end_bb);
         context.switch_bb(br, Some(body_bb))?;
 
@@ -112,7 +105,7 @@ impl GenerateStmt for Stmt {
       }
       Stmt::Return(exp) => {
         let ret_val = match exp {
-          Some(e) => Some(expr::generate(e.as_ref(), context)?),
+          Some(e) => Some(e.expect(Category::RValue)?.generate(context)?),
           None => None,
         };
         let ret = context.dfg().new_value().ret(ret_val);
@@ -131,7 +124,7 @@ impl GenerateStmt for Decl {
           Err(CompileError::IllegalVoid)?;
         }
         for (decl, init) in &declaration.list {
-          let (tys, name) = SysyType::parse(decl.as_ref(), Some(context))?;
+          let (ty, name) = SysyType::parse(decl.as_ref(), Some(context))?;
           if declaration.is_const {
             // 局部常量声明
             let init = init
@@ -142,9 +135,9 @@ impl GenerateStmt for Decl {
               Ok(exp) => match &exp {
                 InitializerLike::Simple(exp) => ConstValue::int(*exp),
                 InitializerLike::Aggregate(_) => {
-                  let size = tys.get_array_size();
+                  let size = ty.get_array_size();
                   let layout = get_layout(&size, &exp, &mut || 0)?;
-                  ConstValue::from(size, layout)
+                  ConstValue::from(ty, layout)
                 }
               },
             };
@@ -153,7 +146,7 @@ impl GenerateStmt for Decl {
             }
           } else {
             // 局部变量声明
-            let alloc = context.dfg().new_value().alloc(tys.to_ir());
+            let alloc = context.dfg().new_value().alloc(ty.to_ir());
             context.add_inst(alloc)?;
             if let Some(ref init) = init {
               let init_value = init.to_value(context)?;
@@ -163,7 +156,7 @@ impl GenerateStmt for Decl {
                   context.add_inst(store)?;
                 }
                 InitializerLike::Aggregate(_) => {
-                  let size = tys.get_array_size();
+                  let size = ty.get_array_size();
                   let layout = get_layout(&size, &init_value, &mut || {
                     context.dfg().new_value().integer(0)
                   })?;
@@ -174,7 +167,7 @@ impl GenerateStmt for Decl {
             context
               .dfg()
               .set_value_name(alloc, Some(format!("@{}", name)));
-            if !context.symbol.insert(&name, Symbol::Var(tys, alloc)) {
+            if !context.symbol.insert(&name, Symbol::Var(ty, alloc)) {
               return Err(CompileError::Redefinition(name.into()))?;
             }
           }
@@ -252,10 +245,9 @@ pub fn get_layout<T: Clone + Copy + Debug, DefaultFn: FnMut() -> T>(
 impl Initializer {
   fn to_value(&self, context: &mut GenerateContext) -> Result<InitializerLike<Value>> {
     match self {
-      Initializer::Simple(exp) => Ok(InitializerLike::Simple(expr::generate(
-        exp.as_ref(),
-        context,
-      )?)),
+      Initializer::Simple(exp) => Ok(InitializerLike::Simple(
+        exp.expect(Category::RValue)?.generate(context)?,
+      )),
       Initializer::Aggregate(aggr) => {
         let mut result: Vec<Rc<_>> = vec![];
         for exp in aggr {

@@ -28,7 +28,6 @@ pub enum BlockItem {
 
 #[derive(Debug)]
 pub enum Stmt {
-  Assign(LVal, Box<Exp>),
   Exp(Option<Box<Exp>>),
   Block(Box<Block>),
   If(Box<Exp>, Box<Stmt>, Option<Box<Stmt>>),
@@ -38,7 +37,17 @@ pub enum Stmt {
   Return(Option<Box<Exp>>),
 }
 
-pub type Exp = LOrExp;
+#[derive(Debug)]
+pub enum Exp {
+  Assign(Box<AssignExp>),
+  Comma(Box<Exp>, Box<AssignExp>),
+}
+
+#[derive(Debug)]
+pub enum AssignExp {
+  LOr(Box<LOrExp>),
+  Assign(Box<LOrExp>, Box<AssignExp>),
+}
 
 #[derive(Debug)]
 pub enum LOrExp {
@@ -105,8 +114,9 @@ pub enum MulOp {
 
 #[derive(Debug)]
 pub enum UnaryExp {
-  Primary(PrimaryExp),
-  Call(String, Vec<Box<Exp>>),
+  Postfix(Box<PostfixExp>),
+  Address(Box<UnaryExp>),
+  Deref(Box<UnaryExp>),
   Op(UnaryOp, Box<UnaryExp>),
 }
 
@@ -118,10 +128,16 @@ pub enum UnaryOp {
 }
 
 #[derive(Debug)]
+pub enum PostfixExp {
+  Primary(PrimaryExp),
+  Subscript(Box<PostfixExp>, Box<Exp>),
+  Call(String, Vec<Box<AssignExp>>),
+}
+
+#[derive(Debug)]
 pub enum PrimaryExp {
   Num(i32),
-  LVal(LVal),
-  Address(LVal),
+  Ident(String),
   Paren(Box<Exp>),
 }
 
@@ -147,17 +163,10 @@ pub enum Declarator {
   Array(Box<Declarator>, Box<Exp>),
 }
 
-pub type Initializer = InitializerLike<Box<Exp>>;
+pub type Initializer = InitializerLike<Box<AssignExp>>;
 
 #[derive(Debug)]
 pub enum InitializerLike<T> {
   Simple(T),
   Aggregate(Vec<Rc<InitializerLike<T>>>),
-}
-
-#[derive(Debug)]
-pub enum LVal {
-  Ident(String),
-  Deref(Box<UnaryExp>),
-  Subscript(Box<LVal>, Box<Exp>),
 }
