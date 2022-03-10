@@ -11,6 +11,6 @@ jobs:
           fetch-depth: 0
       - uses: yesolutions/mirror-action@master
         with:
-          REMOTE: git@gitlab.eduxiji.net:pku1900012983/Compiler_Principles.git
-          GIT_SSH_PRIVATE_KEY: ${{ secrets.GITLAB_SSH_PRIVATE_KEY }}
-          GIT_SSH_NO_VERIFY_HOST: "true"
+          REMOTE: https://gitlab.eduxiji.net/pku1900012983/sysyc.git
+          GIT_USERNAME: pku1900012983
+          GIT_PASSWORD: ${{ secrets.EDUCG_PASSWORD }}
