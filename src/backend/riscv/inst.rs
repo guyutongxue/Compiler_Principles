@@ -113,6 +113,11 @@ pub enum Inst {
   Sll(Reg, Reg, Reg),
 
   /// 指令
+  /// - 汇编格式：`slli rd, rs1, imm12`
+  /// - 行为：对寄存器 `rs1` 进行逻辑左移运算，移位的位数为 `imm12`，结果存入 `rd` 寄存器
+  Slli(Reg, Reg, i32),
+
+  /// 指令
   /// - 汇编格式：`srl rd, rs1, rs2`
   /// - 行为：对寄存器 `rs1` 进行逻辑右移运算，移位的位数为 `rs2` 寄存器的值，结果存入 `rd` 寄存器
   Srl(Reg, Reg, Reg),
@@ -223,6 +228,7 @@ impl fmt::Display for Inst {
       Inst::And(rd, rs1, rs2) => fmt_reg3("and", *rd, *rs1, *rs2),
       Inst::Andi(rd, rs, imm) => fmt_reg2_imm("andi", *rd, *rs, *imm),
       Inst::Sll(rd, rs1, rs2) => fmt_reg3("sll", *rd, *rs1, *rs2),
+      Inst::Slli(rd, rs1, imm) => fmt_reg2_imm("slli", *rd, *rs1, *imm),
       Inst::Srl(rd, rs1, rs2) => fmt_reg3("srl", *rd, *rs1, *rs2),
       Inst::Sra(rd, rs1, rs2) => fmt_reg3("sra", *rd, *rs1, *rs2),
       Inst::Mul(rd, rs1, rs2) => fmt_reg3("mul", *rd, *rs1, *rs2),

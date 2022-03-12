@@ -154,7 +154,7 @@ pub struct DeclaratorAndInitializerList {
   pub list: Vec<DeclaratorAndInitializer>,
 }
 
-pub type DeclaratorAndInitializer = (Box<Declarator>, Option<Initializer>);
+pub type DeclaratorAndInitializer = (Box<Declarator>, Option<Rc<Initializer>>);
 
 #[derive(Debug)]
 pub enum Declarator {

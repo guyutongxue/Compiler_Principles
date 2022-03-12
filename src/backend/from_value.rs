@@ -7,7 +7,9 @@ use super::{error::*, DEBUG_INFO, FUNC_NAMES};
 use crate::Result;
 
 pub fn generate(value: Value, context: &mut GenerateContext) -> Result<()> {
-  context.insts.add_comment(DEBUG_INFO.write()?.pop_front().unwrap());
+  context
+    .insts
+    .add_comment(DEBUG_INFO.write()?.pop_front().unwrap());
   match context.value_kind(value) {
     ValueKind::Binary(binary) => {
       let lhs = binary.lhs();
@@ -83,16 +85,15 @@ pub fn generate(value: Value, context: &mut GenerateContext) -> Result<()> {
     ValueKind::Store(store) => {
       let value = store.value();
       let mut rs = Reg::T0;
-      context.load_value_to_reg(value, &mut rs)?;
+      let mut rd = Reg::T1;
       let dest = store.dest();
+      context.load_value_to_reg(value, &mut rs)?;
       if let Some(var) = context.is_global_value(dest)? {
-        context.push_inst(Inst::La(Reg::T3, var));
-        context.push_inst(Inst::Sw(rs, 0, Reg::T3));
+        context.push_inst(Inst::La(rd, var));
       } else {
-        let mut rd = Reg::T1;
         context.load_value_to_reg(dest, &mut rd)?;
-        context.push_inst(Inst::Sw(rs, 0, rd));
       }
+      context.push_inst(Inst::Sw(rs, 0, rd));
     }
     ValueKind::Load(load) => {
       let rd = Reg::T2;
@@ -177,9 +178,18 @@ fn generate_get_ptr(
 
   let mut index_reg = Reg::T1;
   context.load_value_to_reg(index, &mut index_reg)?;
-  context.push_inst(Inst::Li(Reg::T2, step as i32));
-  context.push_inst(Inst::Mul(Reg::T1, index_reg, Reg::T2));
+  if index_reg != Reg::Zero {
+    let step = step as i32;
+    if (step & (step - 1)) == 0 {
+      // Power of 2
+      let pow = i32::trailing_zeros(step) as i32;
+      context.push_inst(Inst::Slli(Reg::T1, index_reg, pow));
+    } else {
+      context.push_inst(Inst::Li(Reg::T2, step as i32));
+      context.push_inst(Inst::Mul(Reg::T1, index_reg, Reg::T2));
+    }
 
-  context.push_inst(Inst::Add(base_reg, base_reg, Reg::T1));
+    context.push_inst(Inst::Add(base_reg, base_reg, Reg::T1));
+  }
   Ok(base_reg)
 }

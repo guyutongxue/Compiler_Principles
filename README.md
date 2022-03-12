@@ -50,3 +50,20 @@ void swap(int* a, int* b) {
   *b = tmp;
 }
 ```
+
+```c
+void change_arr(int (*arr)[3]) {
+  (*arr)[0] = 1;
+  (*arr)[1] = 2;
+  (*arr)[2] = 3;
+}
+
+int main() {
+  int arr[3];
+  arr[0] = arr[1] = arr[2] = 4;
+  change_arr(&arr);
+  putint(arr[0]), putint(arr[1]), putint(arr[2]);
+  putch('\n');
+  return 0;
+}
+```

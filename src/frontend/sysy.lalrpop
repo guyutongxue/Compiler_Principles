@@ -10,11 +10,19 @@ match {
   _
 }
 
+// comma-separated list of T, can be empty
+Comma<T>: Vec<T> = {
+  <mut v: (<T> ",")*> <e: T?> => match e {
+    None => v,
+    Some(e) => {
+      v.push(e);
+      v
+    }
+  }
+}
+
 pub CompUnit: CompUnit = {
-  <decl: Decl> => vec![<>],
-  <comp_unit: CompUnit> <decl: Decl> => {
-    comp_unit.into_iter().chain(vec![decl]).collect()
-  } 
+  <decl: Decl*> => <>,
 }
 
 Decl: Decl = {
@@ -28,25 +36,16 @@ Decl: Decl = {
 }
 
 BlockDecl: Decl = {
-  "const" <ty: TypeSpec> 
+  <c: "const"?> <ty: TypeSpec> 
   <list: DeclaratorAndInitializerList> ";" => Decl::Var(DeclaratorAndInitializerList {
-    <>,
-    is_const: true,
+    is_const: c.is_some(),
+    ty,
+    list,
   }),
-  <ty: TypeSpec> 
-  <list: DeclaratorAndInitializerList> ";" => Decl::Var(DeclaratorAndInitializerList {
-    <>,
-    is_const: false,
-  })
 }
 
 FuncDeclarator: (String, ParamList, Option<Block>) = {
-  <ident: Ident> "(" ")" <block: FuncBody> => {
-    (ident, vec![], block)
-  },
-  <ident: Ident> "(" <params: ParamList> ")" <block: FuncBody> => {
-    (ident, params, block)
-  },
+  <Ident> "(" <Comma<Param>> ")" <FuncBody> => (<>),
 }
 
 FuncBody: Option<Block> = {
@@ -59,27 +58,12 @@ TypeSpec: TypeSpec = {
   "int" => TypeSpec::Int,
 }
 
-ParamList: ParamList = {
-  <param: Param> => vec![<>],
-  <list: ParamList> "," <param: Param> => {
-    list.into_iter().chain(vec![param]).collect()
-  }
-}
-
 Param: Box<Declarator> = {
   "int" <decl: ParamDeclarator> => <>,
 }
 
 Block: Block = {
-  "{" "}" => vec![],
-  "{" <items: BlockItemList> "}" => <>,
-}
-
-BlockItemList: Vec<BlockItem> = {
-  <item: BlockItem> => vec![item],
-  <list: BlockItemList> <item: BlockItem> => {
-    list.into_iter().chain(vec![item]).collect()
-  }
+  "{" <BlockItem*> "}" => <>,
 }
 
 BlockItem: BlockItem = {
@@ -88,16 +72,16 @@ BlockItem: BlockItem = {
 }
 
 Stmt: Stmt = {
-  <s: PrimaryStmt> => <>,
-  <s: IfStmt> => <>,
-  <s: IfElseStmt> => <>,
-  <s: WhileStmt> => <>,
+  <PrimaryStmt> => <>,
+  <IfStmt> => <>,
+  <IfElseStmt> => <>,
+  <WhileStmt> => <>,
 }
 
 PrimaryStmt: Stmt = {
-  <s: Block> => Stmt::Block(<>.into()),
-  <s: ExprStmt> => <>,
-  <s: ReturnStmt> => <>,
+  <Block> => Stmt::Block(<>.into()),
+  <ExprStmt> => <>,
+  <ReturnStmt> => <>,
   "break" ";" => Stmt::Break,
   "continue" ";" => Stmt::Continue,
 }
@@ -114,9 +98,9 @@ PrimaryStmt: Stmt = {
 /// 最后，IfElseStmt 的真分支使用 -NoShortIf 后缀的语句。
 
 StmtNoShortIf: Stmt = {
-  <s: PrimaryStmt> => <>,
-  <s: IfElseStmtNoShortIf> => <>,
-  <s: WhileStmtNoShortIf> => <>,
+  <PrimaryStmt> => <>,
+  <IfElseStmtNoShortIf> => <>,
+  <WhileStmtNoShortIf> => <>,
 }
 
 IfStmt: Stmt = {
@@ -158,38 +142,36 @@ WhileStmtNoShortIf: Stmt = {
 }
 
 ExprStmt: Stmt = {
-  ";" => Stmt::Exp(None),
-  <exp: Exp> ";" => Stmt::Exp(Some(<>)),
+  <Exp?> ";" => Stmt::Exp(<>),
 }
 
 ReturnStmt: Stmt = {
-  "return" ";" => Stmt::Return(None),
-  "return" <exp: Exp> ";" => Stmt::Return(Some(<>)),
+  "return" <Exp?> ";" => Stmt::Return(<>),
 }
 
 Exp: Box<Exp> = {
-  <exp: AssignExp> => Exp::Assign(<>).into(),
-  <lhs: Exp> "," <rhs: AssignExp> => Exp::Comma(<>).into(),
+  <AssignExp> => Exp::Assign(<>).into(),
+  <Exp> "," <AssignExp> => Exp::Comma(<>).into(),
 }
 
 AssignExp: Box<AssignExp> = {
-  <exp: LOrExp> => AssignExp::LOr(<>).into(),
-  <lhs: LOrExp> "=" <rhs: AssignExp> => AssignExp::Assign(<>).into(),
+  <LOrExp> => AssignExp::LOr(<>).into(),
+  <LOrExp> "=" <AssignExp> => AssignExp::Assign(<>).into(),
 }
 
 LOrExp: Box<LOrExp> = {
-  <exp: LAndExp> => LOrExp::And(<>).into(),
-  <lhs: LOrExp> "||" <rhs: LAndExp> => LOrExp::Or(<>).into(),
+  <LAndExp> => LOrExp::And(<>).into(),
+  <LOrExp> "||" <LAndExp> => LOrExp::Or(<>).into(),
 }
 
 LAndExp: Box<LAndExp> = {
-  <exp: EqExp> => LAndExp::Eq(<>).into(),
-  <lhs: LAndExp> "&&" <rhs: EqExp> => LAndExp::And(<>).into(),
+  <EqExp> => LAndExp::Eq(<>).into(),
+  <LAndExp> "&&" <EqExp> => LAndExp::And(<>).into(),
 }
 
 EqExp: Box<EqExp> = {
-  <exp: RelExp> => EqExp::Rel(<>).into(),
-  <lhs: EqExp> <op: EqOp> <rhs: RelExp> => EqExp::Eq(<>).into(),
+  <RelExp> => EqExp::Rel(<>).into(),
+  <EqExp> <EqOp> <RelExp> => EqExp::Eq(<>).into(),
 }
 
 EqOp: EqOp = {
@@ -198,8 +180,8 @@ EqOp: EqOp = {
 }
 
 RelExp: Box<RelExp> = {
-  <exp: AddExp> => RelExp::Add(<>).into(),
-  <lhs: RelExp> <op: RelOp> <rhs: AddExp> => RelExp::Rel(<>).into(),
+  <AddExp> => RelExp::Add(<>).into(),
+  <RelExp> <RelOp> <AddExp> => RelExp::Rel(<>).into(),
 }
 
 RelOp: RelOp = {
@@ -210,8 +192,8 @@ RelOp: RelOp = {
 }
 
 AddExp: Box<AddExp> = {
-  <exp: MulExp> => AddExp::Mul(<>).into(),
-  <lhs: AddExp> <op: AddOp> <rhs: MulExp> => AddExp::Add(<>).into(),
+  <MulExp> => AddExp::Mul(<>).into(),
+  <AddExp> <AddOp> <MulExp> => AddExp::Add(<>).into(),
 }
 
 AddOp: AddOp = {
@@ -220,8 +202,8 @@ AddOp: AddOp = {
 }
 
 MulExp: Box<MulExp> = {
-  <exp: UnaryExp> => MulExp::Unary(<>).into(),
-  <lhs: MulExp> <op: MulOp> <rhs: UnaryExp> => MulExp::Mul(<>).into(),
+  <UnaryExp> => MulExp::Unary(<>).into(),
+  <MulExp> <MulOp> <UnaryExp> => MulExp::Mul(<>).into(),
 }
 
 MulOp: MulOp = {
@@ -231,24 +213,16 @@ MulOp: MulOp = {
 }
 
 UnaryExp: Box<UnaryExp> = {
-  <exp: PostfixExp> => UnaryExp::Postfix(<>).into(),
-  "*" <exp: UnaryExp> => UnaryExp::Deref(<>).into(),
-  "&" <exp: UnaryExp> => UnaryExp::Address(<>).into(),
-  <op: UnaryOp> <exp: UnaryExp> => UnaryExp::Op(op, exp.into()).into(),
+  <PostfixExp> => UnaryExp::Postfix(<>).into(),
+  "*" <UnaryExp> => UnaryExp::Deref(<>).into(),
+  "&" <UnaryExp> => UnaryExp::Address(<>).into(),
+  <UnaryOp> <UnaryExp> => UnaryExp::Op(<>).into(),
 }
 
 PostfixExp: Box<PostfixExp> = {
-  <exp: PrimaryExp> => PostfixExp::Primary(<>).into(),
-  <lhs: PostfixExp> "[" <rhs: Exp> "]" => PostfixExp::Subscript(<>).into(),
-  <func: Ident> "(" ")" => PostfixExp::Call(func, vec![]).into(),
-  <func: Ident> "(" <args: ArgList> ")" => PostfixExp::Call(func, args).into(),
-}
-
-ArgList: Vec<Box<AssignExp>> = {
-  <exp: AssignExp> => vec![exp],
-  <args: ArgList> "," <exp: AssignExp> => {
-    args.into_iter().chain(vec![exp]).collect()
-  },
+  <PrimaryExp> => PostfixExp::Primary(<>).into(),
+  <PostfixExp> "[" <Exp> "]" => PostfixExp::Subscript(<>).into(),
+  <Ident> "(" <Comma<AssignExp>> ")" => PostfixExp::Call(<>).into(),
 }
 
 UnaryOp: UnaryOp = {
@@ -258,9 +232,9 @@ UnaryOp: UnaryOp = {
 }
 
 PrimaryExp: PrimaryExp = {
-  "(" <exp: Exp> ")" => PrimaryExp::Paren(<>.into()),
-  <num: Number> => PrimaryExp::Num(<>),
-  <ident: Ident> => PrimaryExp::Ident(<>),
+  "(" <Exp> ")" => PrimaryExp::Paren(<>.into()),
+  <Number> => PrimaryExp::Num(<>),
+  <Ident> => PrimaryExp::Ident(<>),
 }
 
 Number: i32 = <num: IntConst> => <>;
@@ -277,54 +251,46 @@ IntConst: i32 = {
 
 DeclaratorAndInitializerList: Vec<DeclaratorAndInitializer> = {
   <def: DeclaratorAndInitializer> => vec![<>],
-  <defs: DeclaratorAndInitializerList> "," <def: DeclaratorAndInitializer> => {
-    defs.into_iter().chain(vec![def]).collect()
+  <mut defs: DeclaratorAndInitializerList> "," <def: DeclaratorAndInitializer> => {
+    defs.push(def);
+    defs
   },
 }
 
 DeclaratorAndInitializer: DeclaratorAndInitializer = {
-  <decl: Declarator> => (decl, None),
-  <decl: Declarator> "=" <init: Initializer> => (decl, Some(init)),
+  <Declarator> <("=" <Initializer>)?> => (<>),
 }
 
-Initializer: Initializer = {
-  <exp: AssignExp> => Initializer::Simple(<>),
-  "{" "}" => Initializer::Aggregate(vec![]),
-  "{" <list: InitializerList> "}" => Initializer::Aggregate(<>),
-}
-
-InitializerList: Vec<Rc<Initializer>> = {
-  <init: Initializer> => vec![init.into()],
-  <list: InitializerList> "," <init: Initializer> => {
-    list.into_iter().chain(vec![init.into()]).collect()
-  },
+Initializer: Rc<Initializer> = {
+  <AssignExp> => Initializer::Simple(<>).into(),
+  "{" <Comma<Initializer>> "}" => Initializer::Aggregate(<>).into(),
 }
 
 Declarator: Box<Declarator> = {
-  <ident: Ident> => Declarator::Ident(<>).into(),
-  "*" <decl: Declarator> => Declarator::Pointer(<>).into(),
-  <decl: NoPtrDeclarator> "[" <exp: Exp> "]" => Declarator::Array(<>).into(),
+  <Ident> => Declarator::Ident(<>).into(),
+  "*" <Declarator> => Declarator::Pointer(<>).into(),
+  <NoPtrDeclarator> "[" <Exp> "]" => Declarator::Array(<>).into(),
 }
 
 NoPtrDeclarator: Box<Declarator> = {
-  <ident: Ident> => Declarator::Ident(<>).into(),
-  "(" "*" <decl: Declarator> ")" => Declarator::Pointer(<>).into(),
-  <decl: NoPtrDeclarator> "[" <exp: Exp> "]" => Declarator::Array(<>).into(),
+  <Ident> => Declarator::Ident(<>).into(),
+  "(" "*" <Declarator> ")" => Declarator::Pointer(<>).into(),
+  <NoPtrDeclarator> "[" <Exp> "]" => Declarator::Array(<>).into(),
 }
 
 ParamDeclarator: Box<Declarator> = {
-  <ident: Ident> => Declarator::Ident(<>).into(),
-  "*" <decl: ParamDeclarator> => Declarator::Pointer(<>).into(),
-  <decl: ParamDeclaratorArraySpec> => <>,
+  <Ident> => Declarator::Ident(<>).into(),
+  "*" <ParamDeclarator> => Declarator::Pointer(<>).into(),
+  <ParamDeclaratorArraySpec> => <>,
 }
 
 NoPtrParamDeclarator: Box<Declarator> = {
-  <ident: Ident> => Declarator::Ident(<>).into(),
-  "(" "*" <decl: ParamDeclarator> ")" => Declarator::Pointer(<>).into(),
-  <decl: ParamDeclaratorArraySpec> => <>,
+  <Ident> => Declarator::Ident(<>).into(),
+  "(" "*" <ParamDeclarator> ")" => Declarator::Pointer(<>).into(),
+  <ParamDeclaratorArraySpec> => <>,
 }
 
 ParamDeclaratorArraySpec: Box<Declarator> = {
-  <decl: NoPtrParamDeclarator> "[" <exp: Exp> "]" => Declarator::Array(<>).into(),
-  <decl: NoPtrParamDeclarator> "[" "]" => Declarator::Pointer(<>).into(),
+  <NoPtrParamDeclarator> "[" <Exp> "]" => Declarator::Array(<>).into(),
+  <NoPtrParamDeclarator> "[" "]" => Declarator::Pointer(<>).into(),
 }

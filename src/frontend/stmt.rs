@@ -127,6 +127,11 @@ impl GenerateStmt for Decl {
           let (ty, name) = SysyType::parse(decl.as_ref(), Some(context))?;
           if declaration.is_const {
             // 局部常量声明
+            if matches!(ty, SysyType::Pointer(_)) {
+              Err(CompileError::Other(
+                "不支持指向常量的指针（不支持 ODR-使用常量）。".into(),
+              ))?;
+            }
             let init = init
               .as_ref()
               .ok_or(CompileError::InitializerRequired(name.into()))?;

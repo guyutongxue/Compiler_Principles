@@ -29,8 +29,8 @@ pub struct GenerateContext<'a> {
 fn generate_param_list(params: &Vec<Box<Declarator>>) -> Result<Vec<(Option<String>, Type)>> {
   let mut ir = vec![];
   for param in params {
-    let (tys, name) = SysyType::parse(param.as_ref(), None)?;
-    let mut ir_ty = tys.to_ir();
+    let (ty, name) = SysyType::parse(param.as_ref(), None)?;
+    let mut ir_ty = ty.to_ir();
     // Perform array-to-pointer conversion
     if let TypeKind::Array(ty, _) = ir_ty.kind() {
       ir_ty = Type::get_pointer(ty.clone());
@@ -80,7 +80,7 @@ impl<'a> GenerateContext<'a> {
 
       // Store parameters to local variable
       for (i, param) in func_ast.params.iter().enumerate() {
-        let (tys, name) = SysyType::parse(param.as_ref(), None)?;
+        let (ty, name) = SysyType::parse(param.as_ref(), None)?;
         let param = this.program.func(this.func).params()[i];
         let param_type = this.dfg().value(param).ty().clone();
 
@@ -91,7 +91,7 @@ impl<'a> GenerateContext<'a> {
         this.dfg().set_value_name(alloc, Some(format!("%{}", name)));
         this.add_inst(store)?;
 
-        if !this.symbol.insert(&name, Symbol::Var(tys, alloc)) {
+        if !this.symbol.insert(&name, Symbol::Var(ty, alloc)) {
           Err(CompileError::Redefinition(name.into()))?;
         }
       }
@@ -184,7 +184,8 @@ decl @stoptime(): i32
 
         if let Some(block) = &decl.body {
           // Function definition
-          if !SymbolTable::insert_global_def(name, Symbol::Func(decl.get_type(None)?, context.func)) {
+          if !SymbolTable::insert_global_def(name, Symbol::Func(decl.get_type(None)?, context.func))
+          {
             Err(CompileError::Redefinition(decl.ident.clone()))?;
           }
           for i in block.iter() {
@@ -203,6 +204,11 @@ decl @stoptime(): i32
           let (ty, name) = SysyType::parse(decl.as_ref(), None)?;
           if declaration.is_const {
             // 全局常量声明
+            if matches!(ty, SysyType::Pointer(_)) {
+              Err(CompileError::Other(
+                "不支持指向常量的指针（不支持 ODR-使用常量）。".into(),
+              ))?;
+            }
             let init = init
               .as_ref()
               .ok_or(CompileError::InitializerRequired(name.into()))?;
