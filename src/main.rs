@@ -8,6 +8,7 @@ use std::io::{stdout, Write};
 mod argparse;
 mod backend;
 mod frontend;
+mod optimization;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -33,6 +34,11 @@ fn compile() -> Result<()> {
     }
     Mode::Riscv => {
       let riscv = backend::generate_riscv(&ir)?;
+      output.write(riscv.to_string().as_bytes())?;
+    }
+    Mode::Perf => {
+      let mut riscv = backend::generate_riscv(&ir)?;
+      riscv = optimization::pass_peephole(&riscv);
       output.write(riscv.to_string().as_bytes())?;
     }
   }

@@ -1,7 +1,7 @@
 mod error;
 mod from_func;
 mod from_value;
-mod riscv;
+pub mod riscv;
 
 use std::collections::{HashMap, VecDeque};
 use std::io::BufWriter;

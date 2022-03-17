@@ -4,6 +4,7 @@ use std::env::Args;
 pub enum Mode {
   Koopa,
   Riscv,
+  Perf,
 }
 
 #[derive(Debug)]
@@ -38,6 +39,7 @@ pub fn parse(mut args: Args) -> Result<ParsedArgs, Box<dyn std::error::Error>> {
       match i.as_str() {
         "-koopa" => set_mode(Mode::Koopa)?,
         "-riscv" => set_mode(Mode::Riscv)?,
+        "-perf" => set_mode(Mode::Perf)?,
         "-o" => pending_output = true,
         _ => return Err(format!("unknown option: {}", i).into()),
       }

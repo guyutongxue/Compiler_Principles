@@ -6,6 +6,7 @@ use std::fmt;
 
 use self::{inst::Inst, directive::Directive};
 
+#[derive(Debug, Clone)]
 pub enum RiscvItem {
   Label(String),
   Inst(Inst),
@@ -14,7 +15,7 @@ pub enum RiscvItem {
   Empty,
 }
 
-pub struct Riscv(Vec<RiscvItem>);
+pub struct Riscv(pub Vec<RiscvItem>);
 
 impl Riscv {
   pub fn new() -> Self {
