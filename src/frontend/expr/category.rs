@@ -14,7 +14,7 @@ use crate::{
   Result,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum Category {
   LValue,
   RValue,

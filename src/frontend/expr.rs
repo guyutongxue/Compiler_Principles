@@ -262,7 +262,7 @@ impl ToIrValue for UnaryExp {
         exp.expect(Category::RValue)?.generate(context)
       },
       UnaryExp::Op(op, exp) => match op {
-        UnaryOp::Positive => generate(exp.as_ref(), context),
+        UnaryOp::Positive => exp.expect(Category::RValue)?.generate(context),
         UnaryOp::Negative => {
           let value = exp.expect(Category::RValue)?.generate(context)?;
           let zero = context.dfg().new_value().integer(0);
