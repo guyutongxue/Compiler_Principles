@@ -1,4 +1,6 @@
+use std::vec::IntoIter;
 use std::fmt::Debug;
+use std::iter::Peekable;
 use std::rc::Rc;
 
 use koopa::ir::builder::{LocalInstBuilder, ValueBuilder};
@@ -187,7 +189,62 @@ impl GenerateStmt for Decl {
   }
 }
 
-/// 将聚合初始化器打平
+fn get_layout_from_iter<T, DefaultFn>(
+  size: &Vec<usize>,
+  iter: &mut Peekable<IntoIter<Rc<InitializerLike<T>>>>,
+  default: &mut DefaultFn,
+) -> Result<Vec<T>>
+where
+  T: Clone + Copy + Debug,
+  DefaultFn: FnMut() -> T,
+{
+  let total = size.iter().fold(1, |acc, x| acc * x);
+
+  if size.len() == 0 {
+    return match iter.next() {
+      None => Ok(vec![default()]),
+      Some(item) => match item.as_ref() {
+        InitializerLike::Simple(exp) => Ok(vec![exp.clone()]),
+        InitializerLike::Aggregate(list) => {
+          let mut iter = list.clone().into_iter().peekable();
+          get_layout_from_iter(size, &mut iter, default)
+        }
+      },
+    };
+  }
+
+  let mut current = vec![];
+  let new_size: Vec<_> = size[1..].iter().cloned().collect();
+  let new_total = new_size.iter().fold(1, |acc, x| acc * x);
+
+  while let Some(item) = iter.peek() {
+    if current.len() == total {
+      return Ok(current);
+    }
+    match item.as_ref() {
+      InitializerLike::Simple(_) => {
+        let result = get_layout_from_iter(&new_size, iter, default)?;
+        current.extend(result);
+      }
+      InitializerLike::Aggregate(list) => {
+        if list.len() > new_total {
+          eprintln!("expect {}, got > {}", new_total, list.len());
+          Err(CompileError::TooManyInitializers)?;
+        }
+        let mut list_iter = list.clone().into_iter().peekable();
+        let result = get_layout_from_iter(&new_size, &mut list_iter, default)?;
+        current.extend(result);
+        iter.next();
+      }
+    }
+  }
+  while current.len() < total {
+    current.push(default());
+  }
+  Ok(current)
+}
+
+/// 将聚合初始化器展开
 pub fn get_layout<T: Clone + Copy + Debug, DefaultFn: FnMut() -> T>(
   size: &Vec<usize>,
   init: &InitializerLike<T>,
@@ -196,53 +253,8 @@ pub fn get_layout<T: Clone + Copy + Debug, DefaultFn: FnMut() -> T>(
   match init {
     InitializerLike::Simple(i) => Ok(vec![i.clone()]),
     InitializerLike::Aggregate(aggr) => {
-      if size.len() == 0 {
-        return match aggr.len() {
-          0 => Ok(vec![default()]),
-          1 => get_layout(size, aggr[0].as_ref(), default),
-          _ => Err(CompileError::TooManyInitializers)?,
-        };
-      }
-      let total = size.iter().fold(1, |acc, x| acc * x);
-      if aggr.len() > total {
-        Err(CompileError::TooManyInitializers)?;
-      }
-
-      let mut current = vec![];
-      let new_size: Vec<_> = size[1..].iter().cloned().collect();
-      let new_total = new_size.iter().fold(1, |acc, x| acc * x);
-
-      let mut i_aggr = 0;
-      let mut i_result = 0;
-      while i_aggr < aggr.len() {
-        let next_aggr;
-        if matches!(aggr[i_aggr].as_ref(), InitializerLike::Simple(_)) {
-          let mut temp_aggr = vec![];
-          let mut j = 0;
-          while j < new_total {
-            temp_aggr.push(if i_aggr + j < aggr.len() {
-              aggr[i_aggr + j].clone()
-            } else {
-              Rc::from(InitializerLike::Simple(default()))
-            });
-            j += 1;
-          }
-          next_aggr = Rc::from(InitializerLike::<T>::Aggregate(temp_aggr));
-          i_aggr += j;
-        } else {
-          next_aggr = aggr[i_aggr].clone();
-          i_aggr += 1;
-        }
-        let result = get_layout(&new_size, next_aggr.as_ref(), default)?;
-        current.extend(result);
-        i_result += new_total;
-      }
-      while i_result < total {
-        current.push(default());
-        i_result += 1;
-      }
-      // println!("size: {:?}, current: {:?}", size, current);
-      Ok(current)
+      let mut iter = aggr.clone().into_iter().peekable();
+      get_layout_from_iter(size, &mut iter, default)
     }
   }
 }
