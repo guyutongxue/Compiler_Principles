@@ -61,8 +61,12 @@ impl Eval for LOrExp {
       LOrExp::And(exp) => exp.eval(context),
       LOrExp::Or(lhs, rhs) => {
         let lhs = lhs.eval(context)?.as_int()? != 0;
-        let rhs = rhs.eval(context)?.as_int()? != 0;
-        Ok(ConstValue::int((lhs || rhs) as i32))
+        if lhs {
+          Ok(ConstValue::int(1))
+        } else {
+          let rhs = rhs.eval(context)?.as_int()? != 0;
+          Ok(ConstValue::int(rhs as i32))
+        }
       }
     }
   }
@@ -74,8 +78,12 @@ impl Eval for LAndExp {
       LAndExp::Eq(exp) => exp.eval(context),
       LAndExp::And(lhs, rhs) => {
         let lhs = lhs.eval(context)?.as_int()? != 0;
-        let rhs = rhs.eval(context)?.as_int()? != 0;
-        Ok(ConstValue::int((lhs && rhs) as i32))
+        if lhs {
+          let rhs = rhs.eval(context)?.as_int()? != 0;
+          Ok(ConstValue::int(rhs as i32))
+        } else {
+          Ok(ConstValue::int(0))
+        }
       }
     }
   }
